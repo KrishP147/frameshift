@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import shutil
 import asyncio
 
@@ -131,12 +131,21 @@ async def get_mask(project_id: str, mask_index: int):
 
 # --- Edit ---
 
-class EditRequest(BaseModel):
-    project_id: str
-    edit_type: str  # "recolor", "resize", "replace"
+class EditRule(BaseModel):
+    edit_type: str  # "recolor", "resize", "replace", "add", "delete"
+    start_frame: int
+    end_frame: int
     color: Optional[str] = None  # hex without #, e.g. "FF0000"
     scale: Optional[float] = None
-    replacement_public_id: Optional[str] = None
+    prompt: Optional[str] = None  # for replace and add
+    asset_x: Optional[int] = None  # for add positioning
+    asset_y: Optional[int] = None
+    asset_w: Optional[int] = None
+    asset_h: Optional[int] = None
+
+class EditRequest(BaseModel):
+    project_id: str
+    edit_rules: List[EditRule]
 
 @app.post("/edit")
 async def edit_frames(req: EditRequest):
@@ -149,61 +158,94 @@ async def edit_frames(req: EditRequest):
     frame_files = sorted(frames_dir.glob("frame_*.jpg"))
     mask_files = sorted(masks_dir.glob("mask_*.png"))
 
-    if len(frame_files) == 0 or len(mask_files) == 0:
-        return {"error": "No frames or masks found. Run /extract and /segment first."}
+    if len(frame_files) == 0:
+        return {"error": "No frames found. Run /extract first."}
 
-    # Upload all frames and masks to Cloudinary
+    # Upload all frames to Cloudinary
     frame_ids = {}
-    mask_ids = {}
-
     for f in frame_files:
         result = cloudinary_service.upload_file(str(f), folder=f"frameshift/{req.project_id}/frames")
         frame_ids[f.name] = result["public_id"]
 
+    # Upload masks if they exist
+    mask_ids = {}
     for m in mask_files:
         result = cloudinary_service.upload_file(str(m), folder=f"frameshift/{req.project_id}/masks")
         mask_ids[m.name] = result["public_id"]
 
-    # Get mask bbox from first mask for positioning
-    from PIL import Image
-    import numpy as np
-    anchor_mask = np.array(Image.open(mask_files[0]))
-    rows = np.any(anchor_mask > 0, axis=1)
-    cols = np.any(anchor_mask > 0, axis=0)
-    y_min, y_max = np.where(rows)[0][[0, -1]]
-    x_min, x_max = np.where(cols)[0][[0, -1]]
-    bbox_x, bbox_y = int(x_min), int(y_min)
-    bbox_w, bbox_h = int(x_max - x_min), int(y_max - y_min)
+    # Get mask bbox for positioning
+    bbox_x, bbox_y, bbox_w, bbox_h = 0, 0, 0, 0
+    if mask_files:
+        from PIL import Image
+        import numpy as np
+        anchor_mask = np.array(Image.open(mask_files[0]))
+        rows = np.any(anchor_mask > 0, axis=1)
+        cols = np.any(anchor_mask > 0, axis=0)
+        if rows.any() and cols.any():
+            y_min, y_max = np.where(rows)[0][[0, -1]]
+            x_min, x_max = np.where(cols)[0][[0, -1]]
+            bbox_x, bbox_y = int(x_min), int(y_min)
+            bbox_w, bbox_h = int(x_max - x_min), int(y_max - y_min)
 
-    # Apply transforms and download results
-    async def process_frame(frame_name, mask_name, index):
+    frame_list = sorted(frame_ids.keys())
+    mask_list = sorted(mask_ids.keys())
+    total_frames = len(frame_list)
+
+    # Determine which frames need edits
+    frames_to_edit = set()
+    for rule in req.edit_rules:
+        for i in range(rule.start_frame, min(rule.end_frame + 1, total_frames + 1)):
+            frames_to_edit.add(i)
+
+    async def process_frame(index):
+        frame_name = frame_list[index - 1]
         f_id = frame_ids[frame_name]
-        m_id = mask_ids[mask_name]
+        m_id = mask_ids.get(mask_list[index - 1], "") if index - 1 < len(mask_list) else ""
 
-        if req.edit_type == "recolor":
-            url = await cloudinary_service.apply_recolor(f_id, m_id, req.color)
-        elif req.edit_type == "resize":
-            url = await cloudinary_service.apply_resize(f_id, m_id, bbox_x, bbox_y, bbox_w, bbox_h, req.scale)
-        elif req.edit_type == "replace":
-            url = await cloudinary_service.apply_replace(f_id, req.replacement_public_id, bbox_x, bbox_y, bbox_w, bbox_h)
-        else:
+        if index not in frames_to_edit:
+            src = frames_dir / frame_name
+            dst = edited_dir / f"frame_{index:04d}.jpg"
+            shutil.copy2(str(src), str(dst))
             return
 
+        # Apply first matching rule for this frame
+        url = None
+        for rule in req.edit_rules:
+            if rule.start_frame <= index <= rule.end_frame:
+                if rule.edit_type == "recolor" and m_id:
+                    url = await cloudinary_service.apply_recolor(f_id, m_id, rule.color)
+                elif rule.edit_type == "resize" and m_id:
+                    url = await cloudinary_service.apply_resize(f_id, m_id, bbox_x, bbox_y, bbox_w, bbox_h, rule.scale)
+                elif rule.edit_type == "replace" and m_id:
+                    url = await cloudinary_service.apply_replace(f_id, m_id, bbox_x, bbox_y, bbox_w, bbox_h)
+                elif rule.edit_type == "delete" and m_id:
+                    url = await cloudinary_service.apply_delete(f_id, m_id)
+                elif rule.edit_type == "add":
+                    url = await cloudinary_service.apply_add(
+                        f_id, rule.prompt,
+                        rule.asset_x or bbox_x, rule.asset_y or bbox_y,
+                        rule.asset_w or bbox_w, rule.asset_h or bbox_h,
+                    )
+                break
+
         save_path = edited_dir / f"frame_{index:04d}.jpg"
-        await cloudinary_service.download_url(url, save_path)
+        if url:
+            await cloudinary_service.download_url(url, save_path)
+        else:
+            shutil.copy2(str(frames_dir / frame_name), str(save_path))
 
     # Process in batches of 20 concurrent
     batch_size = 20
-    frame_list = sorted(frame_ids.keys())
-    mask_list = sorted(mask_ids.keys())
-
-    for i in range(0, len(frame_list), batch_size):
-        batch = []
-        for j in range(i, min(i + batch_size, len(frame_list))):
-            batch.append(process_frame(frame_list[j], mask_list[j], j + 1))
+    for i in range(0, total_frames, batch_size):
+        batch = [process_frame(j + 1) for j in range(i, min(i + batch_size, total_frames))]
         await asyncio.gather(*batch)
 
-    return {"project_id": req.project_id, "edited_frame_count": len(frame_list), "status": "done"}
+    return {
+        "project_id": req.project_id,
+        "edited_frame_count": total_frames,
+        "edited_in_range": len(frames_to_edit),
+        "status": "done",
+    }
 
 
 # --- Render ---
