@@ -21,7 +21,6 @@ AI-powered video editor. User uploads video, clicks an object, applies an edit (
 ```
 1. User uploads video
         ↓
-2. Video stored in Cloudinary (returns public_id + URL)
         ↓
 3. Backend downloads video from Cloudinary URL
         ↓
@@ -61,11 +60,11 @@ AI-powered video editor. User uploads video, clicks an object, applies an edit (
         - Delete: e_gen_remove on masked region
     - Download transformed frame
         ↓
-15. FFmpeg re-encodes transformed frames into final video
+15. FFmpeg re-encodes transformed frames in the range or all the framex into final video
         ↓
 16. Upload final video to Cloudinary → CDN URL returned
         ↓
-17. Frontend plays the edited video
+17. Frontend plays the edited video from cloudinary
 ```
 
 ---

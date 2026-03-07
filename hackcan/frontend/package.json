@@ -11,9 +11,12 @@
   "dependencies": {
     "@cloudinary/react": "^1.14.4",
     "@cloudinary/url-gen": "^1.22.0",
+    "konva": "^10.2.0",
+    "lucide-react": "^0.577.0",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-konva": "^19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
