@@ -204,3 +204,29 @@ async def edit_frames(req: EditRequest):
         await asyncio.gather(*batch)
 
     return {"project_id": req.project_id, "edited_frame_count": len(frame_list), "status": "done"}
+
+
+# --- Render ---
+
+class RenderRequest(BaseModel):
+    project_id: str
+
+@app.post("/render")
+async def render_video(req: RenderRequest):
+    project_dir = project_manager.get_project_dir(req.project_id)
+    edited_dir = project_dir / "edited"
+    output_path = project_dir / "output.mp4"
+
+    edited_frames = sorted(edited_dir.glob("frame_*.jpg"))
+    if len(edited_frames) == 0:
+        return {"error": "No edited frames found. Run /edit first."}
+
+    ffmpeg_service.encode_video(edited_dir, output_path)
+
+    result = cloudinary_service.upload_file(str(output_path), resource_type="video")
+
+    return {
+        "project_id": req.project_id,
+        "video_url": result["url"],
+        "cloudinary_public_id": result["public_id"],
+    }
