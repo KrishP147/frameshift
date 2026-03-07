@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Stage, Layer, Rect, Image as KonvaImage } from "react-konva";
 import { ArrowLeft, Loader2 } from "lucide-react";
@@ -14,63 +14,118 @@ interface Detection {
   bbox: number[];
 }
 
+interface ProjectStatus {
+  status: string;
+  frame_count: number;
+  detecting: boolean;
+  detected_frames: number;
+  detections: Record<string, Detection[]>;
+}
+
 export default function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [frameCount, setFrameCount] = useState(300);
+
+  // Project state
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
+  const [frameCount, setFrameCount] = useState(0);
+  const [detecting, setDetecting] = useState(false);
+  const [detectedFrames, setDetectedFrames] = useState(0);
+  const cachedDetections = useRef<Record<string, Detection[]>>({});
+
+  // Frame viewer state
   const [currentFrame, setCurrentFrame] = useState(1);
+  const currentFrameRef = useRef(1);
   const [frameImage, setFrameImage] = useState<HTMLImageElement | null>(null);
   const [detections, setDetections] = useState<Detection[]>([]);
+  const [canvasSize, setCanvasSize] = useState({ width: 960, height: 540 });
+  const [imageSize, setImageSize] = useState({ width: 960, height: 540 });
+
+  // Edit state
   const [maskVisible, setMaskVisible] = useState(false);
   const [editType, setEditType] = useState("recolor");
   const [editColor, setEditColor] = useState("#FF0000");
   const [editScale, setEditScale] = useState(1.5);
   const [processing, setProcessing] = useState("");
   const [resultUrl, setResultUrl] = useState("");
-  const [canvasSize, setCanvasSize] = useState({ width: 960, height: 540 });
-  const [imageSize, setImageSize] = useState({ width: 960, height: 540 });
+
+  const hasLoadedFirstFrame = useRef(false);
+
+  // Poll project status: wait for frames, then keep polling for detections
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    async function pollStatus() {
+      try {
+        const res = await fetch(`${API_URL}/project/${projectId}/status`);
+        const data: ProjectStatus = await res.json();
+        setProjectStatus(data);
+
+        if (data.frame_count > 0) setFrameCount(data.frame_count);
+        if (data.detections) {
+          cachedDetections.current = data.detections;
+          // Update current frame's bboxes live as YOLO results arrive
+          setDetections(data.detections[String(currentFrameRef.current)] || []);
+        }
+        setDetecting(!!data.detecting);
+        setDetectedFrames(data.detected_frames || 0);
+
+        // Load first frame as soon as status is ready (frames extracted)
+        if (data.status === "ready" && !hasLoadedFirstFrame.current) {
+          hasLoadedFirstFrame.current = true;
+          loadFrame(1, data.detections);
+        }
+
+        // Stop polling once YOLO is also done
+        if (data.status === "ready" && !data.detecting) {
+          clearInterval(interval);
+        }
+      } catch {
+        // Backend not reachable yet, keep polling
+      }
+    }
+
+    pollStatus();
+    interval = setInterval(pollStatus, 1500);
+    return () => clearInterval(interval);
+  }, [projectId]);
+
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   const loadFrame = useCallback(
-    async (index: number) => {
+    (index: number, detectionsMap?: Record<string, Detection[]>) => {
       const img = new window.Image();
       img.crossOrigin = "anonymous";
       img.src = `${API_URL}/frame/${projectId}/${index}`;
       img.onload = () => {
-        const scale = Math.min(960 / img.width, 540 / img.height);
+        // Fit canvas: leave 300px for edit panel + 48px padding, cap height at 65vh
+        const container = canvasContainerRef.current;
+        const maxW = container ? container.clientWidth - 16 : Math.min(window.innerWidth - 348, 1200);
+        const maxH = window.innerHeight * 0.65;
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
         setCanvasSize({
-          width: img.width * scale,
-          height: img.height * scale,
+          width: Math.round(img.width * scale),
+          height: Math.round(img.height * scale),
         });
         setImageSize({ width: img.width, height: img.height });
         setFrameImage(img);
       };
       setCurrentFrame(index);
+      currentFrameRef.current = index;
 
-      const res = await fetch(`${API_URL}/detect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: projectId, frame_index: index }),
-      });
-      const data = await res.json();
-      setDetections(data.objects || []);
+      // Use cached detections from background YOLO run
+      const dets = detectionsMap || cachedDetections.current;
+      setDetections(dets[String(index)] || []);
     },
     [projectId]
   );
 
-  useEffect(() => {
-    fetch(`${API_URL}/project/${projectId}/status`)
-      .then((r) => r.json())
-      .then((d) => { if (d.frame_count > 0) setFrameCount(d.frame_count); })
-      .catch(() => {});
-    loadFrame(1);
-  }, [loadFrame, projectId]);
-
   async function handleCanvasClick(e: any) {
     const stage = e.target.getStage();
     const pos = stage.getPointerPosition();
-    const scaleX = imageSize.width / canvasSize.width;
-    const scaleY = imageSize.height / canvasSize.height;
-    const clickX = Math.round(pos.x * scaleX);
-    const clickY = Math.round(pos.y * scaleY);
+    const sx = imageSize.width / canvasSize.width;
+    const sy = imageSize.height / canvasSize.height;
+    const clickX = Math.round(pos.x * sx);
+    const clickY = Math.round(pos.y * sy);
 
     setProcessing("Segmenting object...");
     const res = await fetch(`${API_URL}/segment`, {
@@ -117,6 +172,41 @@ export default function EditorPage() {
 
   const scaleX = canvasSize.width / imageSize.width;
   const scaleY = canvasSize.height / imageSize.height;
+  const isReady = projectStatus?.status === "ready";
+
+  // Loading state while frames are being extracted
+  if (!isReady) {
+    const statusText =
+      projectStatus?.status === "extracting"
+        ? "Extracting frames from video..."
+        : projectStatus?.status === "processing"
+          ? "Processing video..."
+          : "Loading project...";
+
+    return (
+      <div className="flex min-h-screen flex-col bg-black text-white">
+        <header className="flex items-center gap-4 border-b border-white/10 px-8 py-4">
+          <Link
+            href="/"
+            className="flex items-center gap-1 text-sm text-white/40 transition-colors hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
+          <h1 className="text-xl font-semibold tracking-tight">
+            FrameShift Editor
+          </h1>
+        </header>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-white/40" />
+          <p className="text-lg text-white/50">{statusText}</p>
+          {frameCount > 0 && (
+            <p className="text-sm text-white/30">{frameCount} frames extracted</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-black text-white">
@@ -129,14 +219,22 @@ export default function EditorPage() {
           <ArrowLeft className="h-4 w-4" />
           Back
         </Link>
-        <h1 className="text-xl font-semibold tracking-tight">FrameShift Editor</h1>
+        <h1 className="text-xl font-semibold tracking-tight">
+          FrameShift Editor
+        </h1>
         <span className="font-mono text-xs text-white/30">{projectId}</span>
+        {detecting && (
+          <div className="ml-auto flex items-center gap-2 text-xs text-white/40">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>Detecting objects... {detectedFrames}/{frameCount}</span>
+          </div>
+        )}
       </header>
 
-      <main className="flex flex-1 gap-6 p-6">
+      <main className="flex flex-1 gap-6 overflow-hidden p-6">
         {/* Canvas + scrubber */}
-        <div className="flex-1 min-w-0">
-          <div className="inline-block overflow-hidden rounded-xl border border-white/10">
+        <div className="flex flex-1 min-w-0 flex-col" ref={canvasContainerRef}>
+          <div className="overflow-hidden rounded-xl border border-white/10" style={{ width: canvasSize.width, height: canvasSize.height }}>
             <Stage
               width={canvasSize.width}
               height={canvasSize.height}
@@ -210,7 +308,9 @@ export default function EditorPage() {
           {/* Recolor controls */}
           {editType === "recolor" && (
             <div className="space-y-1.5">
-              <label className="block text-xs text-white/40">Target Color</label>
+              <label className="block text-xs text-white/40">
+                Target Color
+              </label>
               <input
                 type="color"
                 value={editColor}

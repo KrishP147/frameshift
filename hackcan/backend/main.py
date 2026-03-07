@@ -53,8 +53,8 @@ async def upload_video(file: UploadFile = File(...)):
 class ExtractRequest(BaseModel):
     project_id: str
 
-def _background_extract_and_detect(project_id: str):
-    """Background task: extract frames and run YOLO on all."""
+def _background_extract(project_id: str):
+    """Background task: extract frames, then kick off YOLO in background."""
     project_dir = project_manager.get_project_dir(project_id)
     video_path = project_dir / "original.mp4"
     frames_dir = project_dir / "frames"
@@ -62,21 +62,26 @@ def _background_extract_and_detect(project_id: str):
     # Extract frames
     project_manager.update_status(project_id, status="extracting")
     frame_count = ffmpeg_service.extract_frames(video_path, frames_dir)
-    project_manager.update_status(project_id, status="detecting", frame_count=frame_count)
 
-    # Run YOLO on all frames
+    # Mark ready immediately so frontend can show frames
+    project_manager.update_status(project_id, status="ready", frame_count=frame_count, detecting=True, detections={})
+
+    # Run YOLO on all frames, updating detections progressively
     detections = {}
     frame_files = sorted(frames_dir.glob("frame_*.jpg"))
     for i, f in enumerate(frame_files, start=1):
         dets = yolo_service.detect(f)
         detections[str(i)] = dets
+        # Update every 10 frames so frontend can poll partial results
+        if i % 10 == 0 or i == len(frame_files):
+            project_manager.update_status(project_id, detections=detections, detected_frames=i)
 
-    project_manager.update_status(project_id, status="ready", detections=detections)
+    project_manager.update_status(project_id, detecting=False, detections=detections, detected_frames=len(frame_files))
 
 @app.post("/extract")
 async def extract_frames(req: ExtractRequest, background_tasks: BackgroundTasks):
     project_manager.update_status(req.project_id, status="processing")
-    background_tasks.add_task(_background_extract_and_detect, req.project_id)
+    background_tasks.add_task(_background_extract, req.project_id)
     return {"project_id": req.project_id, "status": "processing"}
 
 
@@ -120,23 +125,45 @@ class SegmentRequest(BaseModel):
     click_x: int
     click_y: int
 
+def _background_segment_and_propagate(project_id: str, frame_index: int, click_x: int, click_y: int):
+    """Background task: segment anchor frame, then propagate masks across video."""
+    project_dir = project_manager.get_project_dir(project_id)
+    frame_path = project_dir / "frames" / f"frame_{frame_index:04d}.jpg"
+    masks_dir = project_dir / "masks"
+
+    project_manager.update_status(project_id, segmenting=True, segment_status="segmenting_anchor")
+
+    mask = sam2_service.segment_frame(frame_path, click_x, click_y)
+
+    project_manager.update_status(project_id, segment_status="propagating")
+
+    mask_count = sam2_service.propagate_masks(
+        project_dir / "frames", frame_index, mask, masks_dir,
+        click_x=click_x, click_y=click_y,
+        frame_step=3,
+    )
+
+    project_manager.update_status(
+        project_id, segmenting=False, segment_status="done",
+        mask_count=mask_count, anchor_frame=frame_index,
+    )
+
 @app.post("/segment")
-async def segment_object(req: SegmentRequest):
+async def segment_object(req: SegmentRequest, background_tasks: BackgroundTasks):
     project_dir = project_manager.get_project_dir(req.project_id)
     frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
-    masks_dir = project_dir / "masks"
 
     if not frame_path.exists():
         return {"error": "Frame not found"}
 
-    mask = sam2_service.segment_frame(frame_path, req.click_x, req.click_y)
-    mask_count = sam2_service.propagate_masks(
-        project_dir / "frames", req.frame_index, mask, masks_dir
+    background_tasks.add_task(
+        _background_segment_and_propagate,
+        req.project_id, req.frame_index, req.click_x, req.click_y,
     )
 
     return {
         "project_id": req.project_id,
-        "mask_count": mask_count,
+        "status": "processing",
         "anchor_frame": req.frame_index,
     }
 
