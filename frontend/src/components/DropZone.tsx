@@ -30,7 +30,7 @@ export function DropZone() {
       body: JSON.stringify({ project_id: data.project_id }),
     });
 
-    setUploading(false);
+    // Redirect immediately — editor will poll for readiness
     router.push(`/editor/${data.project_id}`);
   }
 
