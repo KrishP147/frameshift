@@ -59,6 +59,12 @@ Thumbs.db
 .mcp/
 *.mcp
 
+# Model checkpoints
+*.pt
+*.pth
+*.onnx
+checkpoints/
+
 # Misc
 *.pem
 .vercel
