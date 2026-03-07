@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 import shutil
 
-from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service
+from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service
 
 load_dotenv()
 cloudinary_service.configure()
@@ -87,3 +87,41 @@ async def detect_objects(req: DetectRequest):
 
     detections = yolo_service.detect(frame_path)
     return {"project_id": req.project_id, "frame_index": req.frame_index, "objects": detections}
+
+
+# --- Segment ---
+
+class SegmentRequest(BaseModel):
+    project_id: str
+    frame_index: int
+    click_x: int
+    click_y: int
+
+@app.post("/segment")
+async def segment_object(req: SegmentRequest):
+    project_dir = project_manager.get_project_dir(req.project_id)
+    frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
+    masks_dir = project_dir / "masks"
+
+    if not frame_path.exists():
+        return {"error": "Frame not found"}
+
+    mask = sam2_service.segment_frame(frame_path, req.click_x, req.click_y)
+    mask_count = sam2_service.propagate_masks(
+        project_dir / "frames", req.frame_index, mask, masks_dir
+    )
+
+    return {
+        "project_id": req.project_id,
+        "mask_count": mask_count,
+        "anchor_frame": req.frame_index,
+    }
+
+
+@app.get("/mask/{project_id}/{mask_index}")
+async def get_mask(project_id: str, mask_index: int):
+    project_dir = project_manager.get_project_dir(project_id)
+    mask_path = project_dir / "masks" / f"mask_{mask_index:04d}.png"
+    if not mask_path.exists():
+        return {"error": "Mask not found"}
+    return FileResponse(mask_path, media_type="image/png")
