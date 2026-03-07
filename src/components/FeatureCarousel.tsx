@@ -316,6 +316,8 @@ export function FeatureCarousel() {
   }, [isPaused, inView, next]);
 
   const feature = FEATURES[active];
+  const prevIdx = (active - 1 + FEATURES.length) % FEATURES.length;
+  const nextIdx = (active + 1) % FEATURES.length;
 
   return (
     <section
@@ -332,41 +334,114 @@ export function FeatureCarousel() {
           }`}
         >
           AI-powered tools for{" "}
-          <span className={`keyword-highlight animate-color-cycle`}>
+          <span className={`keyword-highlight animate-gradient-text`}>
             every
           </span>{" "}
           edit.
         </h2>
       </div>
 
-      {/* Large centered preview */}
+      {/* Carousel with side peeks */}
       <div
-        className={`max-w-5xl mx-auto ${inView ? "animate-fade-up" : "opacity-0"}`}
+        className={`max-w-6xl mx-auto ${inView ? "animate-fade-up" : "opacity-0"}`}
         style={{ animationDelay: inView ? "0.2s" : undefined }}
       >
-        {/* Video preview area */}
-        <div className="relative aspect-video rounded-2xl overflow-hidden">
-          {FEATURES.map((f, i) => (
+        {/* Three-column: peek | active | peek */}
+        <div className="flex items-stretch gap-3">
+
+          {/* Left peek — previous card */}
+          <button
+            onClick={prev}
+            aria-label="Previous feature"
+            className="hidden md:flex flex-col justify-end flex-shrink-0 w-28 lg:w-36 rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:opacity-80 hover:scale-[1.01]"
+            style={{
+              opacity: 0.45,
+              backgroundColor: FEATURES[prevIdx].previewBg,
+              background: `radial-gradient(ellipse at 50% 40%, ${FEATURES[prevIdx].color}18, ${FEATURES[prevIdx].previewBg} 70%)`,
+            }}
+          >
+            {/* Fade edge */}
             <div
-              key={f.label}
-              className="absolute inset-0 transition-all duration-500"
+              className="absolute inset-y-0 right-0 w-12 pointer-events-none"
+              style={{ background: `linear-gradient(to right, transparent, var(--bg-subtle))` }}
+            />
+            <div className="p-3 relative z-10">
+              <span
+                className="text-[9px] font-bold uppercase tracking-widest"
+                style={{ color: FEATURES[prevIdx].color }}
+              >
+                {FEATURES[prevIdx].label}
+              </span>
+            </div>
+            <div className="h-0.5 w-full" style={{ backgroundColor: FEATURES[prevIdx].color }} />
+          </button>
+
+          {/* Active card */}
+          <div className="flex-1 relative aspect-video rounded-2xl overflow-hidden">
+            {FEATURES.map((f, i) => (
+              <div
+                key={f.label}
+                className="absolute inset-0 transition-all duration-500"
+                style={{
+                  transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
+                  opacity: i === active ? 1 : 0,
+                  transform: i === active ? "scale(1)" : "scale(1.03)",
+                  backgroundColor: f.previewBg,
+                  pointerEvents: i === active ? "auto" : "none",
+                }}
+              >
+                <FeaturePreview label={f.label} color={f.color} />
+
+                {/* Bottom accent line */}
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-1"
+                  style={{ backgroundColor: f.color }}
+                />
+              </div>
+            ))}
+
+            {/* Edit video button */}
+            <button
+              className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-300 hover:brightness-110"
               style={{
-                transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
-                opacity: i === active ? 1 : 0,
-                transform: i === active ? "scale(1)" : "scale(1.03)",
-                backgroundColor: f.previewBg,
-                pointerEvents: i === active ? "auto" : "none",
+                backgroundColor: "rgba(0,0,0,0.5)",
+                border: `1px solid ${feature.color}55`,
+                color: feature.color,
+                backdropFilter: "blur(10px)",
+                WebkitBackdropFilter: "blur(10px)",
               }}
             >
-              <FeaturePreview label={f.label} color={f.color} />
+              Edit video
+            </button>
+          </div>
 
-              {/* Bottom accent line */}
-              <div
-                className="absolute bottom-0 left-0 right-0 h-1"
-                style={{ backgroundColor: f.color }}
-              />
+          {/* Right peek — next card */}
+          <button
+            onClick={next}
+            aria-label="Next feature"
+            className="hidden md:flex flex-col justify-end flex-shrink-0 w-28 lg:w-36 rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:opacity-80 hover:scale-[1.01]"
+            style={{
+              opacity: 0.45,
+              backgroundColor: FEATURES[nextIdx].previewBg,
+              background: `radial-gradient(ellipse at 50% 40%, ${FEATURES[nextIdx].color}18, ${FEATURES[nextIdx].previewBg} 70%)`,
+            }}
+          >
+            {/* Fade edge */}
+            <div
+              className="absolute inset-y-0 left-0 w-12 pointer-events-none"
+              style={{ background: `linear-gradient(to left, transparent, var(--bg-subtle))` }}
+            />
+            <div className="p-3 relative z-10">
+              <span
+                className="text-[9px] font-bold uppercase tracking-widest"
+                style={{ color: FEATURES[nextIdx].color }}
+              >
+                {FEATURES[nextIdx].label}
+              </span>
             </div>
-          ))}
+            <div className="h-0.5 w-full" style={{ backgroundColor: FEATURES[nextIdx].color }} />
+          </button>
+
         </div>
 
         {/* Centered navigation row */}

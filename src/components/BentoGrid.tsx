@@ -8,25 +8,29 @@ const FEATURES = [
     label: "DETECT",
     title: "AI Object Detection",
     description: "Select any object just by clicking on it",
-    bg: "#111827",
+    color: "#F43F5E",
+    bg: "#130508",
   },
   {
     label: "REMOVE",
     title: "Background Removal",
     description: "Remove or swap backgrounds instantly",
-    bg: "#18181B",
+    color: "#0EA5E9",
+    bg: "#06101a",
   },
   {
     label: "RECOLOR",
     title: "Color Grading",
     description: "Change the color of any detected object",
-    bg: "#1C1917",
+    color: "#F59E0B",
+    bg: "#120e05",
   },
   {
     label: "RESIZE",
     title: "Smart Resize",
     description: "Reframe for any platform in one click",
-    bg: "#F43F5E",
+    color: "#10B981",
+    bg: "#06100a",
   },
 ];
 
@@ -45,16 +49,8 @@ export function BentoGrid() {
             }`}
           >
             Edit{" "}
-            <span className="keyword-highlight">
-              {"anything".split("").map((letter, i) => (
-                <span
-                  key={i}
-                  className="wave-letter"
-                  style={{ animationDelay: `${i * 0.08}s` }}
-                >
-                  {letter}
-                </span>
-              ))}
+            <span className="keyword-highlight animate-text-shimmer">
+              anything
             </span>{" "}
             in frame.
           </h2>

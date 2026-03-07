@@ -12,25 +12,12 @@ export function Hero() {
       <div className="w-full max-w-4xl px-6 pt-24 pb-6 flex flex-col items-center">
 
         {/* Heading */}
-        <h1 className="animate-fade-up stagger-1 font-[550] tracking-tight leading-[1.05] text-[clamp(2rem,5.5vw,4.5rem)]">
+        <h1 className="animate-fade-up stagger-1 font-[550] tracking-tight leading-[1.15] text-[clamp(2rem,5.5vw,4.5rem)]">
           One click.
           <br />
-          <span className="inline-grid">
-            <span
-              aria-hidden
-              className="invisible select-none"
-              style={{ gridArea: "1 / 1" }}
-            >
-              Recolor
-            </span>
-            <span
-              className="flex items-center justify-center"
-              style={{ gridArea: "1 / 1" }}
-            >
-              <RotatingWord />
-            </span>
-          </span>{" "}
-          anything.
+          <RotatingWord />
+          <br />
+          <span style={{ color: "var(--accent)" }}>anything.</span>
         </h1>
 
         {/* Subtitle */}

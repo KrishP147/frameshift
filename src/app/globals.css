@@ -168,16 +168,159 @@ body {
   border-radius: 0.125rem;
 }
 
-/* ─── Letter Wave (BentoGrid "anything") ─── */
-@keyframes letter-wave {
-  0%, 100% { transform: translateY(0); }
-  45%       { transform: translateY(-14px); }
-  65%       { transform: translateY(4px); }
+/* ─── Gradient Text (smooth flowing color for "every") ─── */
+@keyframes gradient-shift {
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
 }
 
-.wave-letter {
+.animate-gradient-text {
+  background: linear-gradient(90deg, #F43F5E, #F59E0B, #10B981, #0EA5E9, #F43F5E);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 5s linear infinite;
   display: inline-block;
-  animation: letter-wave 1.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+/* ─── Shimmer Cycle ("anything" — swipe PAINTS the new color across the text) ─── */
+/*
+  Each gradient: oldColor (left 33%) → white flash (center) → newColor (right 33%)
+  background-size: 300% so position 0%=oldColor, 50%=flash, 100%=newColor
+  As the position sweeps 0→100%, the text is literally repainted left-to-right.
+*/
+@keyframes shimmer-cycle {
+  /* Red → Blue */
+  0% {
+    background-image: linear-gradient(90deg, #F43F5E 0%, #F43F5E 33%, #ffffff 50%, #0EA5E9 67%, #0EA5E9 100%);
+    background-position: 0% center;
+    animation-timing-function: ease-in-out;
+  }
+  24.9% {
+    background-image: linear-gradient(90deg, #F43F5E 0%, #F43F5E 33%, #ffffff 50%, #0EA5E9 67%, #0EA5E9 100%);
+    background-position: 100% center;
+    animation-timing-function: steps(1, start);
+  }
+  /* Blue → Amber */
+  25% {
+    background-image: linear-gradient(90deg, #0EA5E9 0%, #0EA5E9 33%, #ffffff 50%, #F59E0B 67%, #F59E0B 100%);
+    background-position: 0% center;
+    animation-timing-function: ease-in-out;
+  }
+  49.9% {
+    background-image: linear-gradient(90deg, #0EA5E9 0%, #0EA5E9 33%, #ffffff 50%, #F59E0B 67%, #F59E0B 100%);
+    background-position: 100% center;
+    animation-timing-function: steps(1, start);
+  }
+  /* Amber → Green */
+  50% {
+    background-image: linear-gradient(90deg, #F59E0B 0%, #F59E0B 33%, #ffffff 50%, #10B981 67%, #10B981 100%);
+    background-position: 0% center;
+    animation-timing-function: ease-in-out;
+  }
+  74.9% {
+    background-image: linear-gradient(90deg, #F59E0B 0%, #F59E0B 33%, #ffffff 50%, #10B981 67%, #10B981 100%);
+    background-position: 100% center;
+    animation-timing-function: steps(1, start);
+  }
+  /* Green → Red */
+  75% {
+    background-image: linear-gradient(90deg, #10B981 0%, #10B981 33%, #ffffff 50%, #F43F5E 67%, #F43F5E 100%);
+    background-position: 0% center;
+    animation-timing-function: ease-in-out;
+  }
+  99.9% {
+    background-image: linear-gradient(90deg, #10B981 0%, #10B981 33%, #ffffff 50%, #F43F5E 67%, #F43F5E 100%);
+    background-position: 100% center;
+    animation-timing-function: steps(1, start);
+  }
+  100% {
+    background-image: linear-gradient(90deg, #F43F5E 0%, #F43F5E 33%, #ffffff 50%, #0EA5E9 67%, #0EA5E9 100%);
+    background-position: 0% center;
+  }
+}
+
+.animate-text-shimmer {
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer-cycle 16s linear infinite;
+  display: inline-block;
+}
+
+/* ─── Card Resize Animation ─── */
+@keyframes card-resize {
+  0%, 100% { transform: scale(0.65); }
+  50%       { transform: scale(1); }
+}
+
+/* ─── Per-word Animations (Rotating Hero Word) ─── */
+
+/* "anything." — constant hue spin */
+@keyframes hue-spin {
+  0%   { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+.animate-hue-spin {
+  color: #F43F5E;
+  display: inline-block;
+  animation: hue-spin 5s linear infinite;
+}
+
+/* Detect — vertical scan line sweeps left-to-right across the word */
+@keyframes word-detect-scan {
+  0%        { left: -4%;  opacity: 0; }
+  5%, 92%   { opacity: 1; }
+  100%      { left: 104%; opacity: 0; }
+}
+.word-anim-detect {
+  display: inline-block;
+  position: relative;
+  padding: 0 4px;
+}
+.word-anim-detect::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4%;
+  width: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  box-shadow: 0 0 8px 2px currentColor;
+  animation: word-detect-scan 2s ease-in-out infinite;
+}
+
+/* Remove — opacity flicker (erasing effect) */
+@keyframes word-remove {
+  0%, 20%, 80%, 100% { opacity: 1; }
+  45%, 55%           { opacity: 0.08; }
+}
+.word-anim-remove {
+  animation: word-remove 2.5s ease-in-out infinite;
+}
+
+/* Recolor — hue rotation on the word's color */
+@keyframes word-recolor {
+  0%   { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+.word-anim-recolor {
+  display: inline-block;
+  animation: word-recolor 3s linear infinite;
+}
+
+/* Resize — scale pulse */
+@keyframes word-resize {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.35); }
+}
+.word-anim-resize {
+  display: inline-block;
+  transform-origin: center;
+  animation: word-resize 1.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
 /* ─── Feature Preview Animations ─── */
