@@ -62,7 +62,12 @@ def _background_extract(project_id: str):
 
     # Extract frames
     project_manager.update_status(project_id, status="extracting")
-    frame_count = ffmpeg_service.extract_frames(video_path, frames_dir)
+    try:
+        frame_count = ffmpeg_service.extract_frames(video_path, frames_dir)
+    except Exception as e:
+        print(f"[extract] FFmpeg failed: {e}")
+        project_manager.update_status(project_id, status="error", error=str(e))
+        return
 
     # Read frame dimensions from first frame
     from PIL import Image

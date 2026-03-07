@@ -1,11 +1,13 @@
 import subprocess
 from pathlib import Path
 
+_FFMPEG = r"C:\Users\User\Downloads\ffmpeg-master-latest-win64-gpl-shared\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+
 
 def extract_frames(video_path: Path, output_dir: Path, fps: int = 30) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg", "-y",
+        _FFMPEG, "-y",
         "-i", str(video_path),
         "-vf", f"fps={fps}",
         str(output_dir / "frame_%04d.jpg"),
@@ -16,7 +18,7 @@ def extract_frames(video_path: Path, output_dir: Path, fps: int = 30) -> int:
 
 def encode_video(frames_dir: Path, output_path: Path, fps: int = 30) -> Path:
     cmd = [
-        "ffmpeg", "-y",
+        _FFMPEG, "-y",
         "-framerate", str(fps),
         "-i", str(frames_dir / "frame_%04d.jpg"),
         "-c:v", "libx264",
