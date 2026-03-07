@@ -1,26 +1,36 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Detection,
   type EditMode,
   type EditParams,
   type FrameData,
-  MOCK_DETECTIONS,
-  MOCK_VIDEO,
   generateFrames,
 } from "@/lib/mock-data";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+interface PerFrameDetections {
+  [frameKey: string]: { label: string; confidence: number; bbox: [number, number, number, number] }[];
+}
+
 interface EditorState {
+  projectId: string | null;
   videoLoaded: boolean;
   videoName: string;
   duration: number;
   fps: number;
   frames: FrameData[];
+  frameWidth: number;
+  frameHeight: number;
   currentFrame: number;
   isPlaying: boolean;
+  allDetections: PerFrameDetections;
   detections: Detection[];
   isDetecting: boolean;
+  isSegmenting: boolean;
+  maskCount: number;
   selectedObjectId: string | null;
   editMode: EditMode | null;
   editParams: EditParams;
@@ -38,17 +48,23 @@ const DEFAULT_EDIT_PARAMS: EditParams = {
   replace: { imageUrl: null },
 };
 
-export function useEditorState() {
+export function useEditorState(projectId?: string) {
   const [state, setState] = useState<EditorState>({
+    projectId: projectId ?? null,
     videoLoaded: false,
     videoName: "",
     duration: 0,
     fps: 30,
     frames: [],
+    frameWidth: 0,
+    frameHeight: 0,
     currentFrame: 0,
     isPlaying: false,
+    allDetections: {},
     detections: [],
     isDetecting: false,
+    isSegmenting: false,
+    maskCount: 0,
     selectedObjectId: null,
     editMode: null,
     editParams: DEFAULT_EDIT_PARAMS,
@@ -60,35 +76,143 @@ export function useEditorState() {
     showToast: false,
   });
 
-  const loadVideo = useCallback(() => {
-    setState((s) => ({
-      ...s,
-      videoLoaded: true,
-      videoName: MOCK_VIDEO.name,
-      duration: MOCK_VIDEO.duration,
-      fps: MOCK_VIDEO.fps,
-      frames: generateFrames(MOCK_VIDEO.frameCount),
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll backend for project status when projectId is provided
+  useEffect(() => {
+    if (!projectId) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_URL}/project/${projectId}/status`);
+        const status = await res.json();
+
+        if (status.status === "ready" || status.status === "extracting") {
+          const frameCount = status.frame_count || 0;
+          if (frameCount > 0) {
+            setState((s) => ({
+              ...s,
+              projectId,
+              videoLoaded: true,
+              videoName: projectId,
+              fps: 30,
+              duration: frameCount / 30,
+              frames: generateFrames(frameCount),
+              frameWidth: status.frame_width || 0,
+              frameHeight: status.frame_height || 0,
+              isDetecting: !!status.detecting,
+              isSegmenting: !!status.segmenting,
+              maskCount: status.mask_count || 0,
+            }));
+
+            // Store all per-frame detections
+            if (status.detections && Object.keys(status.detections).length > 0) {
+              setState((s) => ({ ...s, allDetections: status.detections }));
+            }
+
+            // Stop polling once ready, not detecting, and not segmenting
+            if (status.status === "ready" && !status.detecting && !status.segmenting) {
+              if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+            }
+          }
+        }
+      } catch {
+        // Backend not reachable yet, keep polling
+      }
+    };
+
+    poll();
+    pollingRef.current = setInterval(poll, 1500);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [projectId]);
+
+  // Update displayed detections when frame changes
+  useEffect(() => {
+    const frameKey = String(state.currentFrame + 1); // backend uses 1-based keys
+    const frameDets = state.allDetections[frameKey] || [];
+    const mapped: Detection[] = frameDets.map((d, i) => ({
+      id: `obj-${i}`,
+      label: d.label,
+      confidence: d.confidence,
+      bbox: d.bbox,
     }));
+    setState((s) => ({ ...s, detections: mapped, selectedObjectId: null, showEditPanel: false }));
+  }, [state.currentFrame, state.allDetections]);
+
+  const loadVideo = useCallback(() => {
+    // No-op when using real backend — video loads via polling
   }, []);
 
   const detectObjects = useCallback(() => {
+    if (!state.projectId) return;
     setState((s) => ({ ...s, isDetecting: true }));
-    setTimeout(() => {
-      setState((s) => ({
-        ...s,
-        isDetecting: false,
-        detections: MOCK_DETECTIONS,
-      }));
-    }, 1200);
-  }, []);
+    // Detections are loaded via polling from the backend
+    // They run automatically during /extract
+  }, [state.projectId]);
 
   const selectObject = useCallback((id: string | null) => {
-    setState((s) => ({
-      ...s,
-      selectedObjectId: id,
-      showEditPanel: id !== null,
-      editMode: id !== null ? "recolor" : null,
-    }));
+    setState((s) => {
+      // Trigger segmentation when selecting an object
+      if (id !== null && s.projectId && s.frameWidth > 0) {
+        const det = s.detections.find((d) => d.id === id);
+        if (det) {
+          const [xPct, yPct, wPct, hPct] = det.bbox;
+          const clickX = Math.round(((xPct + wPct / 2) / 100) * s.frameWidth);
+          const clickY = Math.round(((yPct + hPct / 2) / 100) * s.frameHeight);
+
+          fetch(`${API_URL}/segment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: s.projectId,
+              frame_index: s.currentFrame + 1,
+              click_x: clickX,
+              click_y: clickY,
+            }),
+          }).then(() => {
+            // Restart polling to track segmentation progress
+            if (!pollingRef.current) {
+              const poll = async () => {
+                try {
+                  const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
+                  const status = await res.json();
+                  setState((prev) => ({
+                    ...prev,
+                    isSegmenting: !!status.segmenting,
+                    maskCount: status.mask_count || 0,
+                  }));
+                  if (!status.segmenting && status.segment_status === "done") {
+                    if (pollingRef.current) {
+                      clearInterval(pollingRef.current);
+                      pollingRef.current = null;
+                    }
+                  }
+                } catch { /* ignore */ }
+              };
+              pollingRef.current = setInterval(poll, 1500);
+            }
+          });
+        }
+      }
+
+      return {
+        ...s,
+        selectedObjectId: id,
+        showEditPanel: id !== null,
+        editMode: id !== null ? "recolor" : null,
+        isSegmenting: id !== null,
+        maskCount: 0,
+      };
+    });
   }, []);
 
   const setEditMode = useCallback((mode: EditMode) => {

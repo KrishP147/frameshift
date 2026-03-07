@@ -35,26 +35,39 @@ import httpx
 from pathlib import Path
 
 
-async def apply_recolor(frame_public_id: str, mask_public_id: str, color: str) -> str:
-    """Colorize the masked region. Opens mask as overlay layer, colorizes it, applies."""
-    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
-        transformation=[
-            {"overlay": mask_public_id.replace("/", ":"), "effect": f"colorize:80", "color": f"#{color}"},
-            {"flags": "layer_apply", "blend_mode": "multiply"},
-        ],
-        secure=True,
-    )
+def _safe(text: str) -> str:
+    """Sanitize user text for Cloudinary effect parameters."""
+    return text.replace(" ", "_").replace(";", "").replace("/", "").replace(":", "")
+
+
+# ── Core edit types (use SAM 2 mask) ──────────────────────────────────
+
+async def apply_recolor(frame_public_id: str, mask_public_id: str, color: str, prompt: str = None) -> str:
+    """Recolor masked region using generative recolor when prompt is given, else overlay tint."""
+    if prompt:
+        url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+            transformation=[
+                {"effect": f"gen_recolor:prompt_{_safe(prompt)};to-color_{color}"},
+            ],
+            secure=True,
+        )
+    else:
+        url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+            transformation=[
+                {"overlay": mask_public_id.replace("/", ":"), "effect": "colorize:80", "color": f"#{color}"},
+                {"flags": "layer_apply", "blend_mode": "multiply"},
+            ],
+            secure=True,
+        )
     return url
 
 
-async def apply_replace(frame_public_id: str, replacement_public_id: str,
-                         x: int, y: int, w: int, h: int) -> str:
-    """Overlay replacement image at bbox position."""
+async def apply_replace(frame_public_id: str, mask_public_id: str, prompt: str) -> str:
+    """Replace masked object with AI-generated content from a text prompt."""
     url = cloudinary.CloudinaryImage(frame_public_id).build_url(
         transformation=[
-            {"overlay": replacement_public_id.replace("/", ":"),
-             "width": w, "height": h, "crop": "scale"},
-            {"flags": "layer_apply", "x": x, "y": y, "gravity": "north_west"},
+            {"overlay": mask_public_id.replace("/", ":"), "flags": "layer_apply"},
+            {"effect": f"gen_replace:from_masked_region;to_{_safe(prompt)}"},
         ],
         secure=True,
     )
@@ -63,7 +76,7 @@ async def apply_replace(frame_public_id: str, replacement_public_id: str,
 
 async def apply_resize(frame_public_id: str, mask_public_id: str,
                         x: int, y: int, w: int, h: int, scale: float) -> str:
-    """Scale the masked region by factor and overlay back."""
+    """Crop the object region, scale it, fill the gap, and overlay the scaled object."""
     new_w = int(w * scale)
     new_h = int(h * scale)
     offset_x = x - (new_w - w) // 2
@@ -71,8 +84,13 @@ async def apply_resize(frame_public_id: str, mask_public_id: str,
 
     url = cloudinary.CloudinaryImage(frame_public_id).build_url(
         transformation=[
-            {"overlay": mask_public_id.replace("/", ":"),
-             "width": new_w, "height": new_h, "crop": "scale"},
+            # First remove the object to get a clean background
+            {"overlay": mask_public_id.replace("/", ":"), "flags": "layer_apply"},
+            {"effect": "gen_remove"},
+            # Then overlay the original object region at new size
+            {"overlay": frame_public_id.replace("/", ":"),
+             "crop": "crop", "x": x, "y": y, "width": w, "height": h},
+            {"width": new_w, "height": new_h, "crop": "scale"},
             {"flags": "layer_apply", "x": offset_x, "y": offset_y, "gravity": "north_west"},
         ],
         secure=True,
@@ -81,9 +99,10 @@ async def apply_resize(frame_public_id: str, mask_public_id: str,
 
 
 async def apply_delete(frame_public_id: str, mask_public_id: str) -> str:
-    """Remove masked object using Cloudinary generative AI (gen_remove)."""
+    """Remove masked object using gen_remove with mask overlay to target the exact region."""
     url = cloudinary.CloudinaryImage(frame_public_id).build_url(
         transformation=[
+            {"overlay": mask_public_id.replace("/", ":"), "flags": "layer_apply"},
             {"effect": "gen_remove"},
         ],
         secure=True,
@@ -92,11 +111,115 @@ async def apply_delete(frame_public_id: str, mask_public_id: str) -> str:
 
 
 async def apply_add(frame_public_id: str, prompt: str, x: int, y: int, w: int, h: int) -> str:
-    """Generate object from prompt using gen_replace. Replaces background region with prompt object."""
-    safe_prompt = prompt.replace(" ", "_").replace(";", "").replace("/", "")
+    """Generate and add a new object from a text prompt at the specified region."""
     url = cloudinary.CloudinaryImage(frame_public_id).build_url(
         transformation=[
-            {"effect": f"gen_replace:from_background;to_{safe_prompt}"},
+            {"effect": f"gen_fill:prompt_{_safe(prompt)}",
+             "crop": "fill", "gravity": "north_west",
+             "x": x, "y": y, "width": w, "height": h},
+        ],
+        secure=True,
+    )
+    return url
+
+
+# ── Additional Cloudinary AI features ─────────────────────────────────
+
+async def apply_background_remove(frame_public_id: str) -> str:
+    """Remove the background, leaving only foreground objects."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[{"effect": "background_removal"}],
+        secure=True,
+    )
+    return url
+
+
+async def apply_background_replace(frame_public_id: str, prompt: str) -> str:
+    """Replace the background with AI-generated scene from a text prompt."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[
+            {"effect": f"gen_background_replace:prompt_{_safe(prompt)}"},
+        ],
+        secure=True,
+    )
+    return url
+
+
+async def apply_generative_fill(frame_public_id: str, prompt: str = None) -> str:
+    """Extend or fill image regions using generative AI."""
+    effect = f"gen_fill:prompt_{_safe(prompt)}" if prompt else "gen_fill"
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[{"effect": effect}],
+        secure=True,
+    )
+    return url
+
+
+async def apply_enhance(frame_public_id: str) -> str:
+    """AI image enhancement — improve quality and details."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[{"effect": "enhance"}],
+        secure=True,
+    )
+    return url
+
+
+async def apply_upscale(frame_public_id: str) -> str:
+    """AI upscale — increase resolution while preserving quality."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[{"effect": "upscale"}],
+        secure=True,
+    )
+    return url
+
+
+async def apply_restore(frame_public_id: str) -> str:
+    """Generative restore — fix artifacts, noise, and compression damage."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[{"effect": "gen_restore"}],
+        secure=True,
+    )
+    return url
+
+
+async def apply_blur(frame_public_id: str, strength: int = 500) -> str:
+    """Apply blur effect to the frame."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[{"effect": f"blur:{strength}"}],
+        secure=True,
+    )
+    return url
+
+
+async def apply_blur_region(frame_public_id: str, mask_public_id: str) -> str:
+    """Blur only the masked region (e.g. faces, license plates)."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[
+            {"overlay": mask_public_id.replace("/", ":"), "effect": "blur:1000"},
+            {"flags": "layer_apply"},
+        ],
+        secure=True,
+    )
+    return url
+
+
+async def apply_drop_shadow(frame_public_id: str) -> str:
+    """Add a drop shadow to the main subject."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[
+            {"effect": "background_removal"},
+            {"effect": "dropshadow:50", "x": 10, "y": 10},
+        ],
+        secure=True,
+    )
+    return url
+
+
+async def apply_generative_recolor(frame_public_id: str, prompt: str, color: str) -> str:
+    """Generative recolor — recolor a specific object identified by prompt."""
+    url = cloudinary.CloudinaryImage(frame_public_id).build_url(
+        transformation=[
+            {"effect": f"gen_recolor:prompt_{_safe(prompt)};to-color_{color}"},
         ],
         secure=True,
     )
@@ -104,7 +227,7 @@ async def apply_add(frame_public_id: str, prompt: str, x: int, y: int, w: int, h
 
 
 async def download_url(url: str, save_path: Path):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         save_path.write_bytes(resp.content)

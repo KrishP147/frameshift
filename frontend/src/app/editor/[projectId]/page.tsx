@@ -3,14 +3,16 @@
 import { EditorTopBar } from "@/components/editor/EditorTopBar";
 import { EditorSidebar } from "@/components/editor/EditorSidebar";
 import { EditorCanvas } from "@/components/editor/EditorCanvas";
-import { EditPanel } from "@/components/editor/EditPanel";
 import { EditorTimeline } from "@/components/editor/EditorTimeline";
 import { Toast } from "@/components/editor/Toast";
 import { useEditorState } from "@/hooks/useEditorState";
 import { useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
 
 export default function EditorPage() {
-  const editor = useEditorState();
+  const params = useParams();
+  const projectId = params.projectId as string;
+  const editor = useEditorState(projectId);
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Playback loop
@@ -73,31 +75,22 @@ export default function EditorPage() {
         />
 
         <EditorCanvas
+          projectId={projectId}
           videoLoaded={editor.videoLoaded}
           detections={editor.detections}
           isDetecting={editor.isDetecting}
+          isSegmenting={editor.isSegmenting}
+          maskCount={editor.maskCount}
           selectedObjectId={editor.selectedObjectId}
           editMode={editor.editMode}
           editParams={editor.editParams}
           isProcessing={editor.isProcessing}
           zoom={editor.zoom}
+          currentFrame={editor.currentFrame}
           onSelectObject={editor.selectObject}
           onUpload={editor.loadVideo}
         />
 
-        <EditPanel
-          show={editor.showEditPanel}
-          selectedObject={editor.selectedObject}
-          editMode={editor.editMode}
-          editParams={editor.editParams}
-          applyToAllFrames={editor.applyToAllFrames}
-          isProcessing={editor.isProcessing}
-          onEditModeChange={editor.setEditMode}
-          onParamsChange={editor.updateEditParams}
-          onApplyToAllChange={editor.setApplyToAllFrames}
-          onApply={editor.applyEdit}
-          onClose={editor.closeEditPanel}
-        />
       </div>
 
       <EditorTimeline

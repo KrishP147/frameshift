@@ -3,34 +3,49 @@
 import type { Detection, EditMode, EditParams } from "@/lib/mock-data";
 import { BoundingBox } from "./BoundingBox";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 interface EditorCanvasProps {
+  projectId: string | null;
   videoLoaded: boolean;
   detections: Detection[];
   isDetecting: boolean;
+  isSegmenting: boolean;
+  maskCount: number;
   selectedObjectId: string | null;
   editMode: EditMode | null;
   editParams: EditParams;
   isProcessing: boolean;
   zoom: number;
+  currentFrame: number;
   onSelectObject: (id: string | null) => void;
   onUpload: () => void;
 }
 
 export function EditorCanvas({
+  projectId,
   videoLoaded,
   detections,
   isDetecting,
+  isSegmenting,
+  maskCount,
   selectedObjectId,
   editMode,
   editParams,
   isProcessing,
   zoom,
+  currentFrame,
   onSelectObject,
   onUpload,
 }: EditorCanvasProps) {
   if (!videoLoaded) {
     return <EmptyCanvas onUpload={onUpload} />;
   }
+
+  // frame_index is 1-based in the backend
+  const frameUrl = projectId
+    ? `${API_URL}/frame/${projectId}/${currentFrame + 1}`
+    : null;
 
   return (
     <div className="flex-1 flex items-center justify-center bg-[#0a0a0a] overflow-hidden relative">
@@ -40,9 +55,17 @@ export function EditorCanvas({
         onClick={() => onSelectObject(null)}
       >
         <div className="w-[768px] h-[432px] rounded-xl overflow-hidden relative bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460] shadow-2xl">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-white/20 text-sm">Frame Preview</div>
-          </div>
+          {frameUrl ? (
+            <img
+              src={frameUrl}
+              alt={`Frame ${currentFrame + 1}`}
+              className="absolute inset-0 w-full h-full object-contain"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-white/20 text-sm">Frame Preview</div>
+            </div>
+          )}
 
           {isDetecting && (
             <div className="absolute inset-0 animate-detection-shimmer rounded-xl z-20 pointer-events-none" />
@@ -53,6 +76,26 @@ export function EditorCanvas({
               <div className="flex flex-col items-center gap-3">
                 <div className="w-8 h-8 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
                 <span className="text-white text-sm font-medium">Applying edit...</span>
+              </div>
+            </div>
+          )}
+
+          {/* SAM 2 mask overlay */}
+          {projectId && maskCount > 0 && !isSegmenting && (
+            <img
+              src={`${API_URL}/mask/${projectId}/${currentFrame + 1}`}
+              alt="Segmentation mask"
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-[1] mix-blend-screen opacity-40"
+              style={{ filter: "hue-rotate(-30deg) saturate(3)" }}
+            />
+          )}
+
+          {/* Segmenting spinner */}
+          {isSegmenting && (
+            <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+              <div className="flex flex-col items-center gap-2 bg-black/60 px-4 py-3 rounded-xl">
+                <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                <span className="text-white/80 text-xs font-medium">Segmenting...</span>
               </div>
             </div>
           )}

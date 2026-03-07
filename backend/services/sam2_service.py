@@ -8,6 +8,10 @@ import tempfile
 # Enable MPS fallback for unsupported ops
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
+# Patch torch.jit.script to avoid SAM2 JIT compilation errors with newer PyTorch
+import torch
+torch.jit.script = lambda f=None, *args, **kwargs: f if f is not None else (lambda fn: fn)
+
 _image_predictor = None
 _video_predictor = None
 

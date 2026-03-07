@@ -56,7 +56,7 @@ export function EditorSidebar({
   ];
 
   return (
-    <aside className="w-[60px] flex flex-col items-center py-3 gap-1 border-r border-[var(--border-dark)] bg-[#111827]">
+    <aside className="w-[72px] flex flex-col items-center py-4 gap-2 border-r border-[var(--border-dark)] bg-[#111827]">
       {items.map((item) => {
         const Icon = item.icon;
         const isActive = activeId === item.id;
@@ -70,15 +70,15 @@ export function EditorSidebar({
             disabled={item.disabled}
             aria-label={item.label}
             title={item.label}
-            className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 group
-              ${isActive ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "text-white/50 hover:text-white hover:bg-white/5"}
+            className={`relative flex items-center justify-center rounded-2xl transition-all duration-200 group
+              ${isActive ? "w-12 h-12 bg-[var(--accent)]/20 text-[var(--accent)]" : "w-10 h-10 text-white/40 hover:text-white/70 hover:bg-white/5"}
               ${item.disabled ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}
             `}
           >
             {item.loading ? (
-              <div className="w-4 h-4 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
             ) : (
-              <Icon className="w-[18px] h-[18px]" />
+              <Icon className={`${isActive ? "w-5 h-5" : "w-[18px] h-[18px]"} transition-all duration-200`} strokeWidth={isActive ? 2.2 : 1.5} />
             )}
             {/* Tooltip */}
             <span className="absolute left-full ml-2 px-2 py-1 rounded-md bg-white text-[#171717] text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">

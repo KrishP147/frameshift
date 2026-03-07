@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import shutil
 import asyncio
+import numpy as np
 
 from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service
 
@@ -63,8 +64,16 @@ def _background_extract(project_id: str):
     project_manager.update_status(project_id, status="extracting")
     frame_count = ffmpeg_service.extract_frames(video_path, frames_dir)
 
+    # Read frame dimensions from first frame
+    from PIL import Image
+    first_frame = sorted(frames_dir.glob("frame_*.jpg"))[0]
+    img = Image.open(first_frame)
+    frame_width, frame_height = img.size
+
     # Mark ready immediately so frontend can show frames
-    project_manager.update_status(project_id, status="ready", frame_count=frame_count, detecting=True, detections={})
+    project_manager.update_status(project_id, status="ready", frame_count=frame_count,
+                                   frame_width=frame_width, frame_height=frame_height,
+                                   detecting=True, detections={})
 
     # Run YOLO on all frames, updating detections progressively
     detections = {}
@@ -126,26 +135,25 @@ class SegmentRequest(BaseModel):
     click_y: int
 
 def _background_segment_and_propagate(project_id: str, frame_index: int, click_x: int, click_y: int):
-    """Background task: segment anchor frame, then propagate masks across video."""
+    """Background task: segment the single clicked frame only."""
     project_dir = project_manager.get_project_dir(project_id)
     frame_path = project_dir / "frames" / f"frame_{frame_index:04d}.jpg"
     masks_dir = project_dir / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
 
-    project_manager.update_status(project_id, segmenting=True, segment_status="segmenting_anchor")
+    project_manager.update_status(project_id, segmenting=True, segment_status="segmenting")
 
     mask = sam2_service.segment_frame(frame_path, click_x, click_y)
 
-    project_manager.update_status(project_id, segment_status="propagating")
-
-    mask_count = sam2_service.propagate_masks(
-        project_dir / "frames", frame_index, mask, masks_dir,
-        click_x=click_x, click_y=click_y,
-        frame_step=10,
-    )
+    # Save mask for just this frame
+    from PIL import Image
+    mask_img = (mask.astype(np.uint8)) * 255
+    mask_path = masks_dir / f"mask_{frame_index:04d}.png"
+    Image.fromarray(mask_img).save(mask_path)
 
     project_manager.update_status(
         project_id, segmenting=False, segment_status="done",
-        mask_count=mask_count, anchor_frame=frame_index,
+        mask_count=1, anchor_frame=frame_index,
     )
 
 @app.post("/segment")
@@ -180,13 +188,16 @@ async def get_mask(project_id: str, mask_index: int):
 # --- Edit ---
 
 class EditRule(BaseModel):
-    edit_type: str  # "recolor", "resize", "replace", "add", "delete"
+    edit_type: str  # core: recolor, resize, replace, add, delete
+                    # extras: bg_remove, bg_replace, gen_fill, enhance, upscale,
+                    #         restore, blur, blur_region, drop_shadow, gen_recolor
     start_frame: int
     end_frame: int
-    color: Optional[str] = None  # hex without #, e.g. "FF0000"
-    scale: Optional[float] = None
-    prompt: Optional[str] = None  # for replace and add
-    asset_x: Optional[int] = None  # for add positioning
+    color: Optional[str] = None       # hex without #, e.g. "FF0000"
+    scale: Optional[float] = None     # for resize
+    prompt: Optional[str] = None      # for replace, add, bg_replace, gen_fill, gen_recolor
+    blur_strength: Optional[int] = None  # for blur (default 500)
+    asset_x: Optional[int] = None     # for add positioning
     asset_y: Optional[int] = None
     asset_w: Optional[int] = None
     asset_h: Optional[int] = None
@@ -263,20 +274,46 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                 url = None
                 for rule in edit_rules:
                     if rule.start_frame <= index <= rule.end_frame:
-                        if rule.edit_type == "recolor" and m_id:
-                            url = await cloudinary_service.apply_recolor(f_id, m_id, rule.color)
-                        elif rule.edit_type == "resize" and m_id:
+                        t = rule.edit_type
+
+                        # ── Core edits (use SAM 2 mask) ──
+                        if t == "recolor" and m_id:
+                            url = await cloudinary_service.apply_recolor(f_id, m_id, rule.color, rule.prompt)
+                        elif t == "resize" and m_id:
                             url = await cloudinary_service.apply_resize(f_id, m_id, bbox_x, bbox_y, bbox_w, bbox_h, rule.scale)
-                        elif rule.edit_type == "replace" and m_id:
-                            url = await cloudinary_service.apply_replace(f_id, m_id, bbox_x, bbox_y, bbox_w, bbox_h)
-                        elif rule.edit_type == "delete" and m_id:
+                        elif t == "replace" and m_id:
+                            url = await cloudinary_service.apply_replace(f_id, m_id, rule.prompt or "object")
+                        elif t == "delete" and m_id:
                             url = await cloudinary_service.apply_delete(f_id, m_id)
-                        elif rule.edit_type == "add":
+                        elif t == "add":
                             url = await cloudinary_service.apply_add(
-                                f_id, rule.prompt,
+                                f_id, rule.prompt or "object",
                                 rule.asset_x or bbox_x, rule.asset_y or bbox_y,
                                 rule.asset_w or bbox_w, rule.asset_h or bbox_h,
                             )
+                        elif t == "blur_region" and m_id:
+                            url = await cloudinary_service.apply_blur_region(f_id, m_id)
+
+                        # ── Whole-frame edits (no mask needed) ──
+                        elif t == "bg_remove":
+                            url = await cloudinary_service.apply_background_remove(f_id)
+                        elif t == "bg_replace":
+                            url = await cloudinary_service.apply_background_replace(f_id, rule.prompt or "studio background")
+                        elif t == "gen_fill":
+                            url = await cloudinary_service.apply_generative_fill(f_id, rule.prompt)
+                        elif t == "enhance":
+                            url = await cloudinary_service.apply_enhance(f_id)
+                        elif t == "upscale":
+                            url = await cloudinary_service.apply_upscale(f_id)
+                        elif t == "restore":
+                            url = await cloudinary_service.apply_restore(f_id)
+                        elif t == "blur":
+                            url = await cloudinary_service.apply_blur(f_id, rule.blur_strength or 500)
+                        elif t == "drop_shadow":
+                            url = await cloudinary_service.apply_drop_shadow(f_id)
+                        elif t == "gen_recolor":
+                            url = await cloudinary_service.apply_generative_recolor(f_id, rule.prompt or "object", rule.color or "FF0000")
+
                         break
 
                 save_path = edited_dir / f"frame_{index:04d}.jpg"
