@@ -1,9 +1,10 @@
 import uuid
 import json
 import threading
+import tempfile
 from pathlib import Path
 
-BASE_DIR = Path("/tmp/frameshift")
+BASE_DIR = Path(tempfile.gettempdir()) / "frameshift"
 
 _locks: dict[str, threading.Lock] = {}
 _locks_lock = threading.Lock()
