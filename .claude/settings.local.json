@@ -8,7 +8,9 @@
       "Bash(npx tsc:*)",
       "Bash(python:*)",
       "Bash(python3:*)",
-      "Bash(xxd:*)"
+      "Bash(xxd:*)",
+      "Bash(npm install:*)",
+      "Bash(source:*)"
     ]
   }
 }

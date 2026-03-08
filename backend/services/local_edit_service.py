@@ -65,42 +65,72 @@ def apply_resize(frame_path: Path, mask_path: Path, scale: float) -> None:
     y_min, y_max = np.where(rows)[0][[0, -1]]
     x_min, x_max = np.where(cols)[0][[0, -1]]
     
-    # Extract object region
-    obj_region = original[y_min:y_max+1, x_min:x_max+1]
-    obj_mask = alpha[y_min:y_max+1, x_min:x_min+1]
+    # Extract object region and mask
+    obj_region = original[y_min:y_max+1, x_min:x_max+1].copy()
+    obj_mask_region = mask[y_min:y_max+1, x_min:x_max+1]
+    
+    # Calculate new dimensions
+    old_h, old_w = obj_region.shape[:2]
+    new_h = max(1, int(old_h * scale))
+    new_w = max(1, int(old_w * scale))
     
     # Resize object
-    new_h = int(obj_region.shape[0] * scale)
-    new_w = int(obj_region.shape[1] * scale)
-    resized_obj = np.array(Image.fromarray(obj_region).resize((new_w, new_h), Image.LANCZOS))
+    obj_img = Image.fromarray(obj_region)
+    resized_obj = np.array(obj_img.resize((new_w, new_h), Image.LANCZOS))
     
-    # Calculate new position (centered)
-    offset_y = (new_h - obj_region.shape[0]) // 2
-    offset_x = (new_w - obj_region.shape[1]) // 2
+    # Resize mask
+    mask_img = Image.fromarray(obj_mask_region)
+    resized_mask = np.array(mask_img.resize((new_w, new_h), Image.NEAREST))
+    resized_alpha = (resized_mask > 128).astype(np.float32)
+    if resized_alpha.ndim == 2:
+        resized_alpha = resized_alpha[:, :, np.newaxis]
     
-    # Create new mask for resized object
-    resized_mask = np.array(Image.fromarray((mask[y_min:y_max+1, x_min:x_max+1] > 128).astype(np.uint8) * 255).resize((new_w, new_h), Image.NEAREST))
-    resized_alpha = (resized_mask > 128).astype(np.float32)[:, :, np.newaxis]
+    # Calculate center of original bounding box
+    center_y = (y_min + y_max) // 2
+    center_x = (x_min + x_max) // 2
+    
+    # Calculate new bounding box centered on the same point
+    new_y_min = max(0, center_y - new_h // 2)
+    new_y_max = min(original.shape[0], new_y_min + new_h)
+    new_x_min = max(0, center_x - new_w // 2)
+    new_x_max = min(original.shape[1], new_x_min + new_w)
+    
+    # Adjust if we hit boundaries
+    if new_y_max - new_y_min < new_h:
+        new_y_min = max(0, new_y_max - new_h)
+    if new_x_max - new_x_min < new_w:
+        new_x_min = max(0, new_x_max - new_w)
+    
+    # Crop resized object and mask to fit within image bounds
+    crop_y_start = max(0, -new_y_min)
+    crop_y_end = new_h - max(0, new_y_max - original.shape[0])
+    crop_x_start = max(0, -new_x_min)
+    crop_x_end = new_w - max(0, new_x_max - original.shape[1])
+    
+    resized_obj_crop = resized_obj[crop_y_start:crop_y_end, crop_x_start:crop_x_end]
+    resized_alpha_crop = resized_alpha[crop_y_start:crop_y_end, crop_x_start:crop_x_end]
+    
+    # Final placement coordinates
+    final_y_min = max(0, new_y_min)
+    final_y_max = min(original.shape[0], new_y_min + resized_obj_crop.shape[0])
+    final_x_min = max(0, new_x_min)
+    final_x_max = min(original.shape[1], new_x_min + resized_obj_crop.shape[1])
+    
+    # Ensure dimensions match
+    final_h = final_y_max - final_y_min
+    final_w = final_x_max - final_x_min
+    
+    if resized_obj_crop.shape[0] != final_h or resized_obj_crop.shape[1] != final_w:
+        resized_obj_crop = resized_obj_crop[:final_h, :final_w]
+        resized_alpha_crop = resized_alpha_crop[:final_h, :final_w]
     
     # Create result image
     result = original.copy()
     
-    # Place resized object
-    new_y_min = max(0, y_min - offset_y)
-    new_y_max = min(original.shape[0], new_y_min + new_h)
-    new_x_min = max(0, x_min - offset_x)
-    new_x_max = min(original.shape[1], new_x_min + new_w)
-    
-    obj_y_start = max(0, offset_y - y_min)
-    obj_y_end = obj_y_start + (new_y_max - new_y_min)
-    obj_x_start = max(0, offset_x - x_min)
-    obj_x_end = obj_x_start + (new_x_max - new_x_min)
-    
-    resized_crop = resized_obj[obj_y_start:obj_y_end, obj_x_start:obj_x_end]
-    mask_crop = resized_alpha[obj_y_start:obj_y_end, obj_x_start:obj_x_end]
-    
-    result[new_y_min:new_y_max, new_x_min:new_x_max] = (
-        mask_crop * resized_crop + (1 - mask_crop) * result[new_y_min:new_y_max, new_x_min:new_x_max]
+    # Composite: resized object where mask is white, original elsewhere
+    result[final_y_min:final_y_max, final_x_min:final_x_max] = (
+        resized_alpha_crop * resized_obj_crop + 
+        (1 - resized_alpha_crop) * result[final_y_min:final_y_max, final_x_min:final_x_max]
     ).astype(np.uint8)
     
     Image.fromarray(result).save(str(frame_path), quality=95)

@@ -92,6 +92,8 @@ export default function EditorPage() {
         videoLoaded={editor.videoLoaded}
         isDark={isDark}
         onToggleTheme={() => setIsDark((d) => !d)}
+        editApplied={editor.editVersion > 0}
+        onUndo={editor.undoEdit}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -187,6 +189,7 @@ export default function EditorPage() {
         interpolationProgress={editor.aiInterpolationProgress}
         phase={editor.aiEditPhase}
         status={editor.aiEditStatus}
+        onCancel={editor.rejectAIGeneration}
       />
 
       <EditProgressOverlay

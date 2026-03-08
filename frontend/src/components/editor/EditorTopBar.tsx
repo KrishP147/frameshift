@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Play, ChevronLeft, Sun, Moon, Save, Check } from "lucide-react";
+import { Play, ChevronLeft, Sun, Moon, Save, Check, Undo2 } from "lucide-react";
 import { useUser } from "@auth0/nextjs-auth0/client";
 
 interface EditorTopBarProps {
@@ -10,6 +10,8 @@ interface EditorTopBarProps {
   videoLoaded: boolean;
   isDark: boolean;
   onToggleTheme: () => void;
+  editApplied?: boolean;
+  onUndo?: () => void;
 }
 
 export function EditorTopBar({
@@ -18,6 +20,8 @@ export function EditorTopBar({
   videoLoaded,
   isDark,
   onToggleTheme,
+  editApplied,
+  onUndo,
 }: EditorTopBarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -86,8 +90,23 @@ export function EditorTopBar({
         )}
       </div>
 
-      {/* Right: Save + Theme toggle */}
+      {/* Right: Save + Undo + Theme toggle */}
       <div className="flex items-center gap-2">
+        {videoLoaded && editApplied && onUndo && (
+          <button
+            onClick={onUndo}
+            className="flex items-center gap-1.5 px-3 h-9 rounded-xl text-sm font-medium transition-all hover:scale-105"
+            style={{
+              background: "var(--ed-overlay)",
+              color: "var(--ed-icon)",
+              border: "1px solid var(--ed-border)",
+            }}
+            title="Undo last change"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            Undo
+          </button>
+        )}
         {videoLoaded && (
           <button
             onClick={handleSave}
@@ -102,6 +121,7 @@ export function EditorTopBar({
             {saved ? "Saved" : "Save"}
           </button>
         )}
+
         <button
           onClick={onToggleTheme}
           className="w-9 h-9 flex items-center justify-center rounded-xl transition-all hover:scale-105"

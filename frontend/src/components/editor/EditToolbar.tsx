@@ -213,48 +213,25 @@ export function EditToolbar({ objectLabel, active, hasMask, editApplied, isRefin
               {isRefining ? <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.5} /> : null}
               {isRefining ? "Making Realistic..." : "Make Realistic"}
             </button>
-            {editApplied && (
-              <button
-                onClick={onUndo}
-                className="flex items-center gap-2 w-full py-2 px-3 rounded-xl text-xs font-medium transition-all border mb-2"
-                style={{
-                  background: "transparent",
-                  color: "var(--ed-text)",
-                  borderColor: "var(--ed-border)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--ed-surface-2)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <Undo2 className="w-4 h-4" strokeWidth={1.5} />
-                Undo Change
-              </button>
-            )}
+
           </>
-          {editApplied && (
-            <>
-              <button
-                onClick={() => {
-                  const desc = prompt || "Apply the same visual edit consistently";
-                  onPropagate(desc);
-                }}
-                className="flex items-center gap-2 w-full py-2.5 px-3 rounded-xl text-xs font-semibold transition-all border"
-                style={{
-                  background: "linear-gradient(135deg, var(--accent), #8B5CF6)",
-                  color: "#fff",
-                  borderColor: "transparent",
-                  boxShadow: "0 4px 16px rgba(139,92,246,0.3)",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-              >
-                Propagate to All Frames
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => {
+              const desc = prompt || "Apply the same visual edit consistently";
+              onPropagate(desc);
+            }}
+            className="flex items-center gap-2 w-full py-2.5 px-3 rounded-xl text-xs font-semibold transition-all border mt-2"
+            style={{
+              background: "var(--accent)",
+              color: "#fff",
+              borderColor: "transparent",
+              boxShadow: "0 4px 16px rgba(244,63,94,0.25)",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            Propagate to All Frames
+          </button>
         </div>
       ) : (
         <div className="p-4 space-y-4 flex-1">

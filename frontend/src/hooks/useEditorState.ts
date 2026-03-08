@@ -10,6 +10,7 @@ import {
 } from "@/lib/mock-data";
 import type { ChatMessage } from "@/components/editor/AIChatPane";
 import { useVideoStore } from "@/stores/videoStore";
+import { useChangeLogStore } from "@/stores/changeLogStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -584,6 +585,18 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     setState((s) => {
       if (!s.projectId) return s;
 
+      // Log segmentation change
+      const { addLog } = useChangeLogStore.getState();
+      addLog(s.projectId, {
+        projectId: s.projectId,
+        type: "segment",
+        frameIndex: s.currentFrame,
+        data: {
+          clickX,
+          clickY,
+        },
+      });
+
       fetch(`${API_URL}/segment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -704,6 +717,22 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
         if (params.prompt) editRule.prompt = params.prompt;
         if (params.scale) editRule.scale = params.scale;
 
+        // Log edit change
+        const { addLog } = useChangeLogStore.getState();
+        addLog(s.projectId, {
+          projectId: s.projectId,
+          type: "edit",
+          frameIndex: s.currentFrame,
+          data: {
+            editType: action,
+            color: params.color,
+            prompt: params.prompt,
+            scale: params.scale,
+            startFrame: startFrame - 1, // Convert to 0-based
+            endFrame: endFrame - 1,
+          },
+        });
+
         // Add change marker at current frame
         const markerId = `marker_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const newMarker = {
@@ -741,6 +770,17 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     setState((s) => {
       if (!s.projectId) return s;
 
+      // Log refine change
+      const { addLog } = useChangeLogStore.getState();
+      addLog(s.projectId, {
+        projectId: s.projectId,
+        type: "refine",
+        frameIndex: s.currentFrame,
+        data: {
+          prompt: "Make realistic",
+        },
+      });
+
       // Add change marker for refine
       const markerId = `marker_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const newMarker = {
@@ -773,6 +813,14 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     setState((s) => {
       if (!s.projectId) return s;
 
+      // Get all change logs for this project
+      const { getLogs } = useChangeLogStore.getState();
+      const changeLogs = getLogs(s.projectId);
+
+      // Use slider range if set, otherwise use current frame only
+      const startFrame = s.editRangeStart >= 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
+      const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : startFrame; // If no end set, only process start frame
+
       fetch(`${API_URL}/edit/propagate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -780,8 +828,9 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
           project_id: s.projectId,
           frame_index: s.currentFrame + 1,
           prompt,
-          start_frame: s.editRangeStart > 0 ? s.editRangeStart + 1 : 1,
-          end_frame: s.editRangeEnd > 0 ? s.editRangeEnd + 1 : 0,
+          start_frame: startFrame,
+          end_frame: endFrame,
+          change_logs: changeLogs, // Send all logged changes
         }),
       }).then(() => {
         restartPolling();

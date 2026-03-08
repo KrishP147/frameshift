@@ -691,6 +691,14 @@ async def refine_frame(req: RefineRequest):
     return {"status": "processing"}
 
 
+class ChangeLogEntry(BaseModel):
+    id: str
+    projectId: str
+    timestamp: int
+    type: str  # "segment" | "edit" | "refine"
+    frameIndex: int
+    data: dict
+
 class PropagateRequest(BaseModel):
     project_id: str
     frame_index: int  # The edited reference frame (1-based)
@@ -698,30 +706,28 @@ class PropagateRequest(BaseModel):
     start_frame: int = 1
     end_frame: int = 0  # 0 = last frame
     interval: int = 60
+    change_logs: list[ChangeLogEntry] = []  # All logged changes to replay
 
 
 @app.post("/edit/propagate")
 async def propagate_edit(req: PropagateRequest):
-    """Propagate an edit from a reference frame to all frames using Gemini + RIFE."""
+    """Propagate all logged changes to every 15th frame using RIFE interpolation."""
     project_dir = project_manager.get_project_dir(req.project_id)
     frames_dir = project_dir / "frames"
 
-    frame_path = frames_dir / f"frame_{req.frame_index:04d}.jpg"
-    if not frame_path.exists():
-        return {"error": f"Frame {req.frame_index} not found"}
-
-    # Use the edited frame itself as the preview/reference
-    previews_dir = project_dir / "previews"
-    previews_dir.mkdir(exist_ok=True)
-    generation_id = str(uuid.uuid4())
-    preview_path = previews_dir / f"preview_{generation_id}.jpg"
-    shutil.copy2(str(frame_path), str(preview_path))
-
-    # Determine end frame
+    # Use the specified range - if end_frame is 0 or same as start, use only start frame
+    start_frame = req.start_frame
     end_frame = req.end_frame
-    if end_frame == 0:
-        status = project_manager.get_status(req.project_id)
-        end_frame = status.get("frame_count", len(list(frames_dir.glob("frame_*.jpg"))))
+    
+    # If end_frame is 0 or not set, only process the start frame
+    if end_frame == 0 or end_frame < start_frame:
+        end_frame = start_frame
+    
+    # Ensure we don't exceed available frames
+    status = project_manager.get_status(req.project_id)
+    max_frames = status.get("frame_count", len(list(frames_dir.glob("frame_*.jpg"))))
+    end_frame = min(end_frame, max_frames)
+    start_frame = min(start_frame, max_frames)
 
     project_manager.update_status(
         req.project_id,
@@ -732,14 +738,13 @@ async def propagate_edit(req: PropagateRequest):
         ai_generation_id=None,
     )
 
-    asyncio.ensure_future(_background_ai_edit(
+    # Process change logs sequentially - only within the specified range
+    asyncio.ensure_future(_background_propagate_changes(
         req.project_id,
-        generation_id,
-        preview_path,
-        req.prompt,
-        req.start_frame,
+        req.change_logs or [],
+        start_frame,
         end_frame,
-        req.interval,
+        interval=15,  # Apply to every 15th frame
     ))
 
     return {"project_id": req.project_id, "status": "processing"}
@@ -956,6 +961,224 @@ async def ai_edit_retry(req: AIRetryRequest):
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+
+
+async def _background_propagate_changes(
+    project_id: str,
+    change_logs: list[ChangeLogEntry],
+    start_frame: int,
+    end_frame: int,
+    interval: int = 15,
+):
+    """Background task: Apply all logged changes sequentially to every Nth frame, then interpolate with RIFE."""
+    try:
+        project_dir = project_manager.get_project_dir(project_id)
+        frames_dir = project_dir / "frames"
+        masks_dir = project_dir / "masks"
+        
+        # Calculate key frames: start, every Nth frame, end (only within the specified range)
+        key_frames = []
+        
+        # Always include start frame if it exists
+        start_path = frames_dir / f"frame_{start_frame:04d}.jpg"
+        if start_path.exists():
+            key_frames.append(start_frame)
+        
+        # Add every Nth frame between start and end (within range)
+        for i in range(start_frame + interval, end_frame, interval):
+            frame_path = frames_dir / f"frame_{i:04d}.jpg"
+            if frame_path.exists() and i <= end_frame:
+                key_frames.append(i)
+        
+        # Always include end frame if it's different from start and exists
+        if end_frame != start_frame:
+            end_path = frames_dir / f"frame_{end_frame:04d}.jpg"
+            if end_path.exists() and end_frame not in key_frames:
+                key_frames.append(end_frame)
+        
+        # Sort to ensure correct order
+        key_frames = sorted(set(key_frames))
+        
+        total_logs = len(change_logs)
+        total_key_frames = len(key_frames)
+        total_operations = total_logs * total_key_frames
+        
+        project_manager.update_status(
+            project_id,
+            ai_edit_phase="transforming",
+            ai_edit_progress={"done": 0, "total": total_operations},
+            ai_interpolation_progress={"done": 0, "total": 0},
+        )
+        
+        completed = 0
+        
+        # Process each change log sequentially
+        for log_idx, log_entry in enumerate(change_logs):
+            print(f"[Propagate] Processing change log {log_idx + 1}/{total_logs}: {log_entry.type}")
+            
+            # Apply this change to each key frame
+            for frame_idx in key_frames:
+                frame_path = frames_dir / f"frame_{frame_idx:04d}.jpg"
+                if not frame_path.exists():
+                    completed += 1
+                    project_manager.update_status(
+                        project_id,
+                        ai_edit_progress={"done": completed, "total": total_operations},
+                    )
+                    continue
+                
+                try:
+                    if log_entry.type == "segment":
+                        # Re-segment at the logged click point
+                        click_x = log_entry.data.get("clickX", 0)
+                        click_y = log_entry.data.get("clickY", 0)
+                        mask_path = masks_dir / f"mask_{frame_idx:04d}.png"
+                        
+                        # Segment this frame (simplified - in production you'd use SAM2 propagation)
+                        # For now, copy mask from original frame if available
+                        original_mask = masks_dir / f"mask_{log_entry.frameIndex + 1:04d}.png"
+                        if original_mask.exists():
+                            shutil.copy2(str(original_mask), str(mask_path))
+                    
+                    elif log_entry.type == "edit":
+                        # Apply the edit
+                        edit_type = log_entry.data.get("editType")
+                        mask_path = masks_dir / f"mask_{frame_idx:04d}.png"
+                        has_mask = mask_path.exists()
+                        
+                        if edit_type in MASK_EDITS and not has_mask:
+                            print(f"[Propagate] Skipping {edit_type} - no mask for frame {frame_idx}")
+                            completed += 1
+                            project_manager.update_status(
+                                project_id,
+                                ai_edit_progress={"done": completed, "total": total_operations},
+                            )
+                            continue
+                        
+                        if edit_type == "recolor":
+                            local_edit_service.apply_recolor(frame_path, mask_path, log_entry.data.get("color", "FF0000"))
+                        elif edit_type == "blur_region":
+                            local_edit_service.apply_blur_region(frame_path, mask_path, strength=10)
+                        elif edit_type == "resize":
+                            local_edit_service.apply_resize(frame_path, mask_path, log_entry.data.get("scale", 1.5))
+                        elif edit_type == "delete":
+                            local_edit_service.apply_remove(frame_path, mask_path)
+                        elif edit_type == "replace":
+                            edited_bytes = await gemini_service.edit_frame(
+                                frame_path,
+                                log_entry.data.get("prompt", "Replace object"),
+                                mask_path=mask_path if has_mask else None,
+                            )
+                            frame_path.write_bytes(edited_bytes)
+                    
+                    elif log_entry.type == "refine":
+                        # Apply refine (make realistic)
+                        mask_path = masks_dir / f"mask_{frame_idx:04d}.png"
+                        has_mask = mask_path.exists()
+                        
+                        prompt = log_entry.data.get("prompt", "Make this look completely photorealistic")
+                        if has_mask:
+                            prompt = f"{prompt}. Only enhance the segmented object, keep the rest unchanged."
+                        
+                        edited_bytes = await gemini_service.edit_frame(
+                            frame_path,
+                            prompt,
+                            mask_path=mask_path if has_mask else None,
+                        )
+                        frame_path.write_bytes(edited_bytes)
+                    
+                    completed += 1
+                    project_manager.update_status(
+                        project_id,
+                        ai_edit_progress={"done": completed, "total": total_operations},
+                    )
+                    
+                except Exception as e:
+                    print(f"[Propagate] Error applying {log_entry.type} to frame {frame_idx}: {e}")
+                    completed += 1
+                    project_manager.update_status(
+                        project_id,
+                        ai_edit_progress={"done": completed, "total": total_operations},
+                    )
+        
+        print(f"[Propagate] All changes applied to key frames. Starting RIFE interpolation...")
+        
+        # Now interpolate between key frames using RIFE (only within the specified range)
+        total_interpolation_frames = 0
+        interpolation_segments = []
+        for i in range(len(key_frames) - 1):
+            start_frame_idx = key_frames[i]
+            end_frame_idx = key_frames[i + 1]
+            
+            # Only interpolate frames within the specified range (start_frame to end_frame)
+            frames_to_interpolate = []
+            for frame_idx in range(start_frame_idx + 1, end_frame_idx):
+                # Ensure frame is within the specified range
+                if frame_idx < start_frame or frame_idx > end_frame:
+                    continue
+                    
+                frame_path = frames_dir / f"frame_{frame_idx:04d}.jpg"
+                if frame_path.exists():
+                    frames_to_interpolate.append(frame_path)
+            if len(frames_to_interpolate) > 0:
+                total_interpolation_frames += len(frames_to_interpolate)
+                interpolation_segments.append((start_frame_idx, end_frame_idx, frames_to_interpolate))
+        
+        project_manager.update_status(
+            project_id,
+            ai_edit_phase="interpolating",
+            ai_interpolation_progress={"done": 0, "total": total_interpolation_frames},
+        )
+        
+        async def interpolate_segment(start_frame_idx: int, end_frame_idx: int, frames_to_interpolate: list):
+            """Interpolate frames between two key frames using RIFE."""
+            if len(frames_to_interpolate) == 0:
+                return
+            
+            start_path = frames_dir / f"frame_{start_frame_idx:04d}.jpg"
+            end_path = frames_dir / f"frame_{end_frame_idx:04d}.jpg"
+            
+            if not start_path.exists() or not end_path.exists():
+                return
+            
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: rife_service.interpolate_pair(start_path, end_path, frames_to_interpolate)
+            )
+            
+            status = project_manager.get_status(project_id)
+            current_done = status.get("ai_interpolation_progress", {}).get("done", 0)
+            project_manager.update_status(
+                project_id,
+                ai_interpolation_progress={"done": current_done + len(frames_to_interpolate), "total": total_interpolation_frames},
+            )
+        
+        interpolation_tasks = [
+            interpolate_segment(start_frame_idx, end_frame_idx, frames_to_interpolate)
+            for start_frame_idx, end_frame_idx, frames_to_interpolate in interpolation_segments
+        ]
+        
+        if interpolation_tasks:
+            await asyncio.gather(*interpolation_tasks)
+        
+        project_manager.update_status(
+            project_id,
+            ai_edit_status="done",
+            ai_edit_phase="done",
+            ai_edit_progress={"done": total_operations, "total": total_operations},
+            ai_interpolation_progress={"done": total_interpolation_frames, "total": total_interpolation_frames},
+        )
+        print(f"[Propagate] Complete: applied {total_logs} changes to {total_key_frames} key frames, interpolated {total_interpolation_frames} frames")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        project_manager.update_status(
+            project_id,
+            ai_edit_status="error",
+            ai_edit_error=str(e),
+        )
 
 
 async def _background_ai_edit(

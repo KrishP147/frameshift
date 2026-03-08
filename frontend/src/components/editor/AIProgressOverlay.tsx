@@ -8,9 +8,10 @@ interface AIProgressOverlayProps {
   interpolationProgress: { done: number; total: number };
   phase: "transforming" | "interpolating" | "done" | null;
   status: string;
+  onCancel?: () => void;
 }
 
-export function AIProgressOverlay({ show, progress, interpolationProgress, phase, status }: AIProgressOverlayProps) {
+export function AIProgressOverlay({ show, progress, interpolationProgress, phase, status, onCancel }: AIProgressOverlayProps) {
   // Determine which progress to show based on phase
   const isTransforming = phase === "transforming" || phase === null;
   const isInterpolating = phase === "interpolating";
@@ -167,6 +168,21 @@ export function AIProgressOverlay({ show, progress, interpolationProgress, phase
               This may take a few minutes...
             </span>
           </div>
+        )}
+
+        {/* Cancel button */}
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            className="mt-2 px-5 py-2 rounded-xl text-sm font-medium transition-all hover:scale-105"
+            style={{
+              background: "var(--ed-surface-2)",
+              color: "var(--ed-muted)",
+              border: "1px solid var(--ed-border)",
+            }}
+          >
+            Cancel
+          </button>
         )}
       </div>
     </div>
