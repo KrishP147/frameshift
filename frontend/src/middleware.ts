@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth0";
 
-const PROTECTED = ["/dashboard", "/editor"];
+// Only dashboard requires auth; editor is public (upload → edit without logging in)
+const PROTECTED = ["/dashboard"];
 
 export async function middleware(req: NextRequest) {
   // Let Auth0 handle its own routes first
@@ -26,7 +27,6 @@ export const config = {
   matcher: [
     "/dashboard",
     "/dashboard/:path*",
-    "/editor/:path*",
     "/api/auth/:path*",
     "/api/projects/:path*",
   ],

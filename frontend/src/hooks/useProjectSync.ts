@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useUser } from "@auth0/nextjs-auth0/client";
 
 /**
- * Debounces the current frame position to Supabase every 5 seconds.
- * Also syncs status and thumbnail when the project transitions to ready.
+ * When authenticated, debounces frame position and syncs status/thumbnail to Supabase.
+ * When not logged in, no API calls — editing works fully without auth.
  */
 export function useProjectSync({
   projectId,
@@ -19,14 +20,18 @@ export function useProjectSync({
   status: string;
   thumbnailUrl?: string | null;
 }) {
+  const { user } = useUser();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncedFrame = useRef<number>(-1);
   const lastSyncedStatus = useRef<string>("");
   const thumbnailSynced = useRef(false);
 
+  // Only sync when authenticated (API requires auth)
+  const isAuthenticated = !!user;
+
   // Debounced frame position sync
   useEffect(() => {
-    if (!projectId || !videoLoaded) return;
+    if (!isAuthenticated || !projectId || !videoLoaded) return;
     if (currentFrame === lastSyncedFrame.current) return;
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -42,11 +47,11 @@ export function useProjectSync({
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [currentFrame, projectId, videoLoaded]);
+  }, [isAuthenticated, currentFrame, projectId, videoLoaded]);
 
   // Sync status changes to Supabase
   useEffect(() => {
-    if (!projectId || !status) return;
+    if (!isAuthenticated || !projectId || !status) return;
     if (status === lastSyncedStatus.current) return;
     lastSyncedStatus.current = status;
 
@@ -55,11 +60,11 @@ export function useProjectSync({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     }).catch(() => {});
-  }, [status, projectId]);
+  }, [isAuthenticated, status, projectId]);
 
   // Sync thumbnail once when video becomes ready
   useEffect(() => {
-    if (!projectId || !thumbnailUrl || thumbnailSynced.current) return;
+    if (!isAuthenticated || !projectId || !thumbnailUrl || thumbnailSynced.current) return;
     thumbnailSynced.current = true;
 
     fetch(`/api/projects/${projectId}`, {
@@ -67,5 +72,5 @@ export function useProjectSync({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thumbnail_url: thumbnailUrl }),
     }).catch(() => {});
-  }, [thumbnailUrl, projectId]);
+  }, [isAuthenticated, thumbnailUrl, projectId]);
 }
