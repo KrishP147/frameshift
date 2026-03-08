@@ -36,7 +36,10 @@ export default function EditorPage() {
       setCurrentProject(projectId);
     }
   }, [projectId, setCurrentProject]);
-  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number>(0);
+  const currentFrameRef = useRef(editor.currentFrame);
+  const framesLengthRef = useRef(editor.frames.length);
   const [isDark, setIsDark] = useState(false);
 
   // Playback loop — 15 fps so frames have time to load
