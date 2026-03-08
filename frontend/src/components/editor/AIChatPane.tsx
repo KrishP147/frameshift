@@ -150,14 +150,13 @@ export function AIChatPane({
           <div className="flex flex-col gap-2">
             <button
               onClick={onAccept}
-              disabled={aiEditStatus === "applying"}
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-all"
               style={{
                 background: "linear-gradient(135deg, var(--accent), #8B5CF6)",
                 color: "#fff",
                 boxShadow: "0 4px 16px rgba(139,92,246,0.3)",
               }}
-              onMouseEnter={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = "0.9")}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
               onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
             >
               <Check className="w-3.5 h-3.5" />

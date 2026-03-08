@@ -20,9 +20,9 @@ export interface ChangeLogEntry {
     scale?: number;
     startFrame?: number;
     endFrame?: number;
-    
+
     // For refine
-    prompt?: string;
+    refinePrompt?: string;
   };
 }
 
