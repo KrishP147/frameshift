@@ -99,6 +99,42 @@ npm run dev
 
 App runs at `http://localhost:3000`.
 
+## Cloudinary Transformations
+
+FrameShift uses Cloudinary's transformation pipeline to apply per-frame edits. All transformations are built as URLs via `CloudinaryImage.build_url()` and downloaded locally before FFmpeg re-encodes the final video.
+
+### Edit types (object-aware, use SAM 2 mask)
+
+| Edit type | Cloudinary effect | Description |
+|---|---|---|
+| Recolor | `gen_recolor:prompt_<obj>;to-color_<hex>` | Recolor a specific object by prompt or mask |
+| Resize | Overlay crop + scale + `layer_apply` | Crop the object region and scale it in place |
+| Delete | `gen_remove` | AI-powered object removal |
+| Replace | `gen_replace:from_auto;to_<prompt>` | Swap object with AI-generated content from a text prompt |
+| Add | `gen_fill:prompt_<prompt>` with crop region | Generate and composite a new object at a specified region |
+
+### Additional AI effects
+
+| Effect | Cloudinary effect | Description |
+|---|---|---|
+| Background remove | `background_removal` | Remove background, keep foreground |
+| Background replace | `gen_background_replace:prompt_<prompt>` | Replace background with AI-generated scene |
+| Generative fill | `gen_fill` / `gen_fill:prompt_<prompt>` | Extend or fill regions with generative AI |
+| Blur (full frame) | `blur:<strength>` | Apply blur to the entire frame |
+| Blur (region) | Mask overlay + `blur:1000` + `layer_apply` | Blur only the masked region (faces, plates) |
+| Enhance | `enhance` | AI quality and detail improvement |
+| Upscale | `upscale` | AI resolution upscaling |
+| Restore | `gen_restore` | Fix compression artifacts and noise |
+| Drop shadow | `background_removal` → `dropshadow:50` | Remove background then add drop shadow to subject |
+
+### How it works
+
+```
+Frame JPEG → upload to Cloudinary → build transformation URL → download result → FFmpeg re-encode
+```
+
+Transformations are applied per frame across the selected frame range, then all processed frames are stitched back into a video and uploaded to Cloudinary for delivery.
+
 ## API Endpoints
 
 | Method | Path | Description |
