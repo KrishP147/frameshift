@@ -147,20 +147,25 @@ export function AIChatPane({
           <p className="text-xs mb-2 text-center" style={{ color: "var(--ed-subtle)" }}>
             Review the preview in the canvas above
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
             <button
               onClick={onAccept}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all"
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-all"
               style={{
-                background: "var(--accent)",
+                background: "linear-gradient(135deg, var(--accent), #8B5CF6)",
                 color: "#fff",
+                boxShadow: "0 4px 16px rgba(139,92,246,0.3)",
               }}
               onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
               onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
             >
               <Check className="w-3.5 h-3.5" />
-              Accept
+              Apply to All Frames
             </button>
+            <p className="text-[10px] text-center" style={{ color: "var(--ed-disabled)" }}>
+              Propagates this edit across the entire video
+            </p>
+            <div className="flex gap-2">
             <button
               onClick={onReject}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all border"
@@ -189,6 +194,7 @@ export function AIChatPane({
               <RotateCcw className="w-3.5 h-3.5" />
               Retry
             </button>
+            </div>
           </div>
         </div>
       )}

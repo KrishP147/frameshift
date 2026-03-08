@@ -189,7 +189,7 @@ export default function EditorPage() {
         interpolationProgress={editor.aiInterpolationProgress}
         phase={editor.aiEditPhase}
         status={editor.aiEditStatus}
-        onCancel={editor.rejectAIGeneration}
+        onCancel={editor.cancelEdit}
       />
 
       <EditProgressOverlay

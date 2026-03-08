@@ -70,7 +70,7 @@ async def edit_frame(frame_path: Path, prompt: str, mask_path: Path | None = Non
             # Fallback to regular flash model if image model doesn't work
             print(f"Image model failed, trying flash model: {str(e)}")
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 contents=[
                     types.Content(
                         parts=[
@@ -248,7 +248,7 @@ async def edit_frame_with_reference(frame_path: Path, prompt: str, reference_fra
             # Fallback to regular flash model if image model doesn't work
             print(f"Image model failed, trying flash model: {str(e)}")
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 contents=[
                     types.Content(parts=parts)
                 ],

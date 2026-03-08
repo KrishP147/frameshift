@@ -4,7 +4,6 @@ import { useState, useRef } from "react";
 import {
   Palette,
   Maximize2,
-  Replace,
   Trash2,
   EyeOff,
   ImageOff,
@@ -12,7 +11,6 @@ import {
   Sparkles,
   ArrowUpCircle,
   WandSparkles,
-  Droplets,
   Film,
   Undo2,
   Loader2,
@@ -21,7 +19,6 @@ import {
 export type EditAction =
   | "recolor"
   | "resize"
-  | "replace"
   | "delete"
   | "blur_region"
   | "bg_remove"
@@ -29,7 +26,6 @@ export type EditAction =
   | "enhance"
   | "upscale"
   | "restore"
-  | "gen_recolor";
 
 interface EditOption {
   id: EditAction;
@@ -44,10 +40,8 @@ interface EditOption {
 const EDIT_OPTIONS: EditOption[] = [
   { id: "delete", icon: Trash2, label: "Remove", category: "object" },
   { id: "recolor", icon: Palette, label: "Recolor", needsColor: true, category: "object" },
-  { id: "replace", icon: Replace, label: "Replace", needsPrompt: true, category: "object" },
   { id: "resize", icon: Maximize2, label: "Resize", needsScale: true, category: "object" },
   { id: "blur_region", icon: EyeOff, label: "Blur", category: "object" },
-  { id: "gen_recolor", icon: Droplets, label: "AI Recolor", needsPrompt: true, needsColor: true, category: "object" },
   { id: "bg_remove", icon: ImageOff, label: "Remove BG", category: "frame" },
   { id: "bg_replace", icon: ImagePlus, label: "Replace BG", needsPrompt: true, category: "frame" },
   { id: "enhance", icon: Sparkles, label: "Enhance", category: "frame" },

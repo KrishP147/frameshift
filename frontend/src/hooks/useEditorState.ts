@@ -584,6 +584,8 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
   const segmentAtPoint = useCallback((clickX: number, clickY: number) => {
     setState((s) => {
       if (!s.projectId) return s;
+      // Don't segment while showing AI preview — preserve the preview state
+      if (s.aiEditStatus === "preview") return s;
 
       // Log segmentation change
       const { addLog } = useChangeLogStore.getState();
@@ -705,9 +707,11 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
       setState((s) => {
         if (!s.projectId) return s;
 
-        // Use edit range if explicitly set, otherwise just the current frame
-        const startFrame = s.editRangeStart > 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
-        const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.currentFrame + 1;
+        // Mask edits (object edits) always target current frame only since SAM2 mask is single-frame
+        const MASK_ACTIONS = new Set(["delete", "replace", "resize", "blur_region", "gen_recolor", "recolor"]);
+        const isMaskEdit = MASK_ACTIONS.has(action);
+        const startFrame = isMaskEdit ? s.currentFrame + 1 : (s.editRangeStart > 0 ? s.editRangeStart + 1 : s.currentFrame + 1);
+        const endFrame = isMaskEdit ? s.currentFrame + 1 : (s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.currentFrame + 1);
         const editRule: Record<string, unknown> = {
           edit_type: action,
           start_frame: startFrame,
@@ -873,7 +877,7 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
             prompt: "Apply the same realistic enhancement consistently",
             start_frame: startFrame + 1,
             end_frame: endFrame + 1,
-            interval: 60,
+            interval: 8,
           }),
         }).then(() => {
           restartPolling();
@@ -1042,6 +1046,7 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
             message: "Preview generated! Review it in the canvas.",
             timestamp: Date.now(),
           };
+          acceptInProgressRef.current = false; // Reset so accept button works
           setState((prev) => ({
             ...prev,
             aiChatHistory: [...prev.aiChatHistory, assistantMessage],
@@ -1067,120 +1072,64 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
   }, []);
 
   const acceptAIGeneration = useCallback(() => {
-    // Use ref to prevent duplicate calls (faster than state check)
-    if (acceptInProgressRef.current) {
-      console.log("Accept already in progress (ref check), ignoring duplicate call");
-      return;
-    }
+    if (acceptInProgressRef.current) return;
 
     setState((s) => {
-      if (!s.projectId || !s.aiGenerationId) {
-        console.log("Cannot accept: missing projectId or generationId");
-        return s;
-      }
-      // Prevent multiple calls - if already applying, ignore
-      if (s.aiEditStatus === "applying") {
-        console.log("Already applying, ignoring duplicate accept call");
-        return s;
-      }
+      if (!s.projectId || !s.aiGenerationId) return s;
+      if (s.aiEditStatus === "applying") return s;
 
-      // Set ref immediately to prevent race conditions
       acceptInProgressRef.current = true;
+      const generationId = s.aiGenerationId;
+      const startFrame = s.currentFrame + 1;
+      const endFrame = s.frames.length;
+      const interval = 8;
 
-      const startFrame = s.editRangeStart > 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
-      const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.frames.length;
-      const interval = 60; // Transform every 60th frame from start to end
-
-      const generationId = s.aiGenerationId; // Save before clearing
-
-      // Set status immediately to prevent duplicate calls and clear generation ID
-      console.log("[acceptAIGeneration] Setting status to 'applying'");
-      setState((prev) => {
-        const newState = {
-          ...prev,
-          aiEditStatus: "applying" as const,
-          aiPreviewFrameUrl: null, // Clear preview when starting to apply
-          aiGenerationId: null, // Clear generation ID to prevent duplicate calls
-          aiEditProgress: { done: 0, total: 0 }, // Reset progress
-          aiEditPhase: "transforming" as const,
-          aiInterpolationProgress: { done: 0, total: 0 },
-        };
-        console.log("[acceptAIGeneration] New state:", {
-          aiEditStatus: newState.aiEditStatus,
-          aiEditProgress: newState.aiEditProgress
-        });
-        return newState;
-      });
-
-      console.log("Calling accept with generation_id:", generationId);
       fetch(`${API_URL}/ai/edit/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: s.projectId,
-          generation_id: generationId, // Use saved generation ID
+          generation_id: generationId,
           start_frame: startFrame,
           end_frame: endFrame,
           interval: interval,
         }),
-      }).then((res) => {
-        if (!res.ok) {
-          const errorData = res.json().catch(() => ({}));
-          throw new Error(`Accept failed: ${res.status}`);
-        }
-        return res.json();
-      }).then(async (data) => {
-        if (data.error) {
-          // Special case: if edit is already in progress, don't reset to idle
-          // Instead, sync with current backend state and keep applying status
-          if (data.error === "Edit already in progress" && data.status === "processing") {
-            console.log("Edit already in progress - syncing state with backend progress");
-            // Sync state with backend's current progress
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.error && data.status !== "processing") {
+            acceptInProgressRef.current = false;
             setState((prev) => ({
               ...prev,
-              aiEditStatus: "applying",
-              aiEditProgress: data.progress || prev.aiEditProgress,
-              aiEditPhase: data.phase || prev.aiEditPhase,
-              aiInterpolationProgress: data.interpolation_progress || prev.aiInterpolationProgress,
+              aiEditStatus: "idle" as const,
+              showToast: true,
+              toastMessage: data.error,
             }));
-            // Don't reset ref - keep it as true so loading screen shows
-            // Polling will continue to update the status
-            return;
           }
-
-          console.error("Accept error from backend:", data.error);
-          acceptInProgressRef.current = false; // Reset ref on error
+          // Status is "processing" — polling will handle progress updates
+          restartPolling();
+        })
+        .catch((err) => {
+          acceptInProgressRef.current = false;
           setState((prev) => ({
             ...prev,
-            aiEditStatus: "idle",
-            aiEditProgress: { done: 0, total: 0 },
-            aiEditPhase: null,
-            aiInterpolationProgress: { done: 0, total: 0 },
+            aiEditStatus: "idle" as const,
             showToast: true,
-            toastMessage: data.error,
+            toastMessage: `Failed to accept: ${err.message}`,
           }));
-          return;
-        }
-        console.log("Accept started successfully, status:", data);
-        // Keep status as "applying" - unified polling will handle updates
-        // Don't reset status here, let polling update it
-      }).catch((err) => {
-        acceptInProgressRef.current = false; // Reset ref on error
-        console.error("Accept error:", err);
-        setState((prev) => ({
-          ...prev,
-          aiEditStatus: "idle",
-          aiEditProgress: { done: 0, total: 0 },
-          aiEditPhase: null,
-          aiInterpolationProgress: { done: 0, total: 0 },
-          showToast: true,
-          toastMessage: `Failed to accept: ${err.message}`,
-        }));
-      });
+        });
 
-      return s;
+      return {
+        ...s,
+        aiEditStatus: "applying" as const,
+        aiPreviewFrameUrl: null,
+        aiGenerationId: null,
+        aiEditProgress: { done: 0, total: 0 },
+        aiEditPhase: "transforming" as const,
+        aiInterpolationProgress: { done: 0, total: 0 },
+      };
     });
-  }, []);
+  }, [restartPolling]);
 
   const rejectAIGeneration = useCallback(() => {
     setState((s) => {
@@ -1195,6 +1144,7 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
         }),
       });
 
+      acceptInProgressRef.current = false;
       return {
         ...s,
         aiPreviewFrameUrl: null,

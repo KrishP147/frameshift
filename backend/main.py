@@ -9,6 +9,7 @@ import asyncio
 import numpy as np
 import uuid
 from pathlib import Path
+from io import BytesIO
 
 from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service, gemini_service, rife_service, storage_service
 from services.auth_service import get_current_user
@@ -306,6 +307,21 @@ class EditRequest(BaseModel):
     project_id: str
     edit_rules: List[EditRule]
 
+def _save_edited_frame(frame_path: Path, edited_bytes: bytes):
+    """Save edited bytes to frame, resizing to match original dimensions if needed."""
+    from PIL import Image
+    orig = Image.open(frame_path)
+    orig_size = orig.size
+    orig.close()
+    edited = Image.open(BytesIO(edited_bytes))
+    if edited.size != orig_size:
+        print(f"[RESIZE] {frame_path.name}: {edited.size} -> {orig_size}")
+        edited = edited.resize(orig_size, Image.LANCZOS)
+    buf = BytesIO()
+    edited.save(buf, format="JPEG", quality=95)
+    frame_path.write_bytes(buf.getvalue())
+
+
 def _composite_with_mask(original_path, edited_path, mask_array):
     """Blend edited image onto original using SAM2 mask: edited where mask=white, original elsewhere."""
     from PIL import Image
@@ -452,7 +468,7 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                                     mask_path=mask_path
                                 )
                                 # Save edited frame
-                                frame_path.write_bytes(edited_bytes)
+                                _save_edited_frame(frame_path, edited_bytes)
                             except Exception as e:
                                 print(f"[Edit] Gemini replace failed for frame {idx}: {e}")
                         elif t == "gen_recolor":
@@ -465,7 +481,7 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                                     prompt,
                                     mask_path=mask_path
                                 )
-                                frame_path.write_bytes(edited_bytes)
+                                _save_edited_frame(frame_path, edited_bytes)
                             except Exception as e:
                                 print(f"[Edit] Gemini AI recolor failed for frame {idx}: {e}")
                                 # Fallback to simple recolor
@@ -492,7 +508,7 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                                     "Remove the background, keep only the main subject",
                                     mask_path=None
                                 )
-                                frame_path.write_bytes(edited_bytes)
+                                _save_edited_frame(frame_path, edited_bytes)
                             except Exception as e:
                                 print(f"[Edit] Gemini bg_remove failed for frame {idx}: {e}")
                         elif t == "bg_replace":
@@ -503,7 +519,7 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                                     f"Replace the background with {rule.prompt or 'a studio background'}",
                                     mask_path=None
                                 )
-                                frame_path.write_bytes(edited_bytes)
+                                _save_edited_frame(frame_path, edited_bytes)
                             except Exception as e:
                                 print(f"[Edit] Gemini bg_replace failed for frame {idx}: {e}")
                         elif t == "gen_fill":
@@ -514,7 +530,7 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                                     rule.prompt or "Fill the empty space naturally",
                                     mask_path=None
                                 )
-                                frame_path.write_bytes(edited_bytes)
+                                _save_edited_frame(frame_path, edited_bytes)
                             except Exception as e:
                                 print(f"[Edit] Gemini gen_fill failed for frame {idx}: {e}")
 
@@ -676,7 +692,7 @@ async def refine_frame(req: RefineRequest):
                 ).strip()
                 # Apply enhancement to the entire frame
                 edited_bytes = await gemini_service.edit_frame(frame_path, prompt, mask_path=None)
-            frame_path.write_bytes(edited_bytes)
+            _save_edited_frame(frame_path, edited_bytes)
 
             project_manager.update_status(
                 req.project_id,
@@ -710,7 +726,7 @@ class PropagateRequest(BaseModel):
     prompt: str       # Description of the edit to propagate
     start_frame: int = 1
     end_frame: int = 0  # 0 = last frame
-    interval: int = 60
+    interval: int = 8
     change_logs: list[ChangeLogEntry] = []  # All logged changes to replay
 
 
@@ -767,7 +783,7 @@ class AIAcceptRequest(BaseModel):
     generation_id: str
     start_frame: int
     end_frame: int
-    interval: int = 60  # Transform every Nth frame between start and end
+    interval: int = 8  # Transform every Nth frame between start and end
 
 class AIRejectRequest(BaseModel):
     project_id: str
@@ -843,56 +859,35 @@ async def get_preview(project_id: str, generation_id: str):
 
 @app.post("/ai/edit/accept")
 async def ai_edit_accept(req: AIAcceptRequest):
-    """Accept preview and apply transformation to range of frames."""
+    """Accept preview and propagate transformation to all frames."""
     print(f"Accept endpoint called: project_id={req.project_id}, generation_id={req.generation_id}")
     project_dir = project_manager.get_project_dir(req.project_id)
     status = project_manager.get_status(req.project_id)
-    
-    # Prevent duplicate processing - check both status and generation_id
+
     current_status = status.get("ai_edit_status")
     if current_status == "processing":
-        print(f"REJECTING duplicate accept: already processing (generation_id: {status.get('ai_generation_id')})")
-        # Return current progress so frontend can sync state
-        current_progress = status.get("ai_edit_progress", {"done": 0, "total": 0})
-        current_phase = status.get("ai_edit_phase", "transforming")
-        interpolation_progress = status.get("ai_interpolation_progress", {"done": 0, "total": 0})
-        return {
-            "error": "Edit already in progress", 
-            "status": "processing",
-            "progress": current_progress,
-            "phase": current_phase,
-            "interpolation_progress": interpolation_progress,
-        }
-    
-    # Also check if this generation_id was already processed (generation_id is cleared after completion)
+        return {"error": "Edit already in progress", "status": "processing"}
+
     stored_generation_id = status.get("ai_generation_id")
     if stored_generation_id and stored_generation_id != req.generation_id:
-        print(f"REJECTING accept: generation_id mismatch. Expected: {stored_generation_id}, Got: {req.generation_id}")
-        return {"error": "Invalid generation_id - this preview was already processed or expired"}
-    
-    # If generation_id is None, it means it was already processed
+        return {"error": "Invalid generation_id"}
     if stored_generation_id is None:
-        print(f"REJECTING accept: generation_id is None - edit was already completed")
         return {"error": "This preview was already processed"}
-    
+
     previews_dir = project_dir / "previews"
     preview_path = previews_dir / f"preview_{req.generation_id}.jpg"
     if not preview_path.exists():
         return {"error": "Preview not found"}
 
-    prompt = status.get("ai_prompt", "")
-    if not prompt:
-        return {"error": "Prompt not found in status"}
+    prompt = status.get("ai_prompt", "") or "Apply the same visual edit consistently"
 
-    # Start background task - clear generation_id immediately to prevent duplicate calls
     project_manager.update_status(
         req.project_id,
         ai_edit_status="processing",
         ai_edit_progress={"done": 0, "total": 0},
-        ai_generation_id=None,  # Clear immediately to prevent duplicate accepts
+        ai_generation_id=None,
     )
-    print(f"Started processing for generation_id: {req.generation_id}")
-    
+
     asyncio.ensure_future(_background_ai_edit(
         req.project_id,
         req.generation_id,
@@ -902,7 +897,7 @@ async def ai_edit_accept(req: AIAcceptRequest):
         req.end_frame,
         req.interval,
     ))
-    
+
     return {"status": "processing"}
 
 
@@ -1042,7 +1037,7 @@ async def _background_propagate_changes(
                         # Segment this frame (simplified - in production you'd use SAM2 propagation)
                         # For now, copy mask from original frame if available
                         original_mask = masks_dir / f"mask_{log_entry.frameIndex + 1:04d}.png"
-                        if original_mask.exists():
+                        if original_mask.exists() and original_mask != mask_path:
                             shutil.copy2(str(original_mask), str(mask_path))
                     
                     elif log_entry.type == "edit":
@@ -1074,7 +1069,7 @@ async def _background_propagate_changes(
                                 log_entry.data.get("prompt", "Replace object"),
                                 mask_path=mask_path if has_mask else None,
                             )
-                            frame_path.write_bytes(edited_bytes)
+                            _save_edited_frame(frame_path, edited_bytes)
                     
                     elif log_entry.type == "refine":
                         # Apply refine (make realistic)
@@ -1090,7 +1085,7 @@ async def _background_propagate_changes(
                             prompt,
                             mask_path=mask_path if has_mask else None,
                         )
-                        frame_path.write_bytes(edited_bytes)
+                        _save_edited_frame(frame_path, edited_bytes)
                     
                     completed += 1
                     project_manager.update_status(
@@ -1159,13 +1154,8 @@ async def _background_propagate_changes(
                 ai_interpolation_progress={"done": current_done + len(frames_to_interpolate), "total": total_interpolation_frames},
             )
         
-        interpolation_tasks = [
-            interpolate_segment(start_frame_idx, end_frame_idx, frames_to_interpolate)
-            for start_frame_idx, end_frame_idx, frames_to_interpolate in interpolation_segments
-        ]
-        
-        if interpolation_tasks:
-            await asyncio.gather(*interpolation_tasks)
+        for start_frame_idx, end_frame_idx, frames_to_interpolate in interpolation_segments:
+            await interpolate_segment(start_frame_idx, end_frame_idx, frames_to_interpolate)
         
         project_manager.update_status(
             project_id,
@@ -1257,9 +1247,9 @@ async def _background_ai_edit(
                         preview_path,
                         mask_path=mask_path_param,
                     )
-                    
-                    # Save transformed frame (overwrite original)
-                    frame_path.write_bytes(edited_bytes)
+
+                    # Save transformed frame (resizes to match original if needed)
+                    _save_edited_frame(frame_path, edited_bytes)
                     
                     elapsed = time.time() - start_time
                     print(f"[DONE] Frame {frame_idx} completed in {elapsed:.2f}s")
@@ -1338,13 +1328,11 @@ async def _background_ai_edit(
                 ai_interpolation_progress={"done": current_done + len(frames_to_interpolate), "total": total_interpolation_frames},
             )
         
-        # Interpolate between each pair of consecutive key frames
-        interpolation_tasks = []
+        # Interpolate sequentially — RIFE model is not thread-safe
         for start_frame_idx, end_frame_idx, frames_to_interpolate in interpolation_segments:
-            interpolation_tasks.append(interpolate_segment(start_frame_idx, end_frame_idx, frames_to_interpolate))
-        
-        if interpolation_tasks:
-            await asyncio.gather(*interpolation_tasks)
+            await interpolate_segment(start_frame_idx, end_frame_idx, frames_to_interpolate)
+
+        if interpolation_segments:
             print(f"[INFO] RIFE interpolation complete: interpolated {total_interpolation_frames} frames")
         
         project_manager.update_status(
