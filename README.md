@@ -1,4 +1,4 @@
-# FrameShift AI
+# FrameShift
 
 By Bryan Lin, Justin Wang, Daniel Zhao, and Krish Punjabi.
 
