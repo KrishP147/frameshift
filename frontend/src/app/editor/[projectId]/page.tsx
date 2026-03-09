@@ -36,6 +36,7 @@ export default function EditorPage() {
       setCurrentProject(projectId);
     }
   }, [projectId, setCurrentProject]);
+  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
   const currentFrameRef = useRef(editor.currentFrame);
