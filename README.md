@@ -1,30 +1,118 @@
-# FrameShift
+<p align="center">
+  <img src="frontend/public/Thumbnail.png" alt="FrameShift Logo" width="400">
+</p>
 
-By Bryan Lin, Justin Wang, Daniel Zhao, and Krish Punjabi.
+<p align="center">
+  <strong>AI-powered video editing. Click an object, apply an edit, propagate across every frame.</strong>
+</p>
 
-AI-powered video editor. Upload a video, click an object, apply edits — changes propagate across every frame automatically. **Cloudinary** is used for image and video storage and for per-frame transforms (including thumbnails).
+<p align="center">
+  Built by <a href="https://github.com/KrishP147">Krish Punjabi</a>, Bryan Lin, Justin Wang, and Daniel Zhao.
+</p>
 
-## What it does
+---
 
-- Upload a video and FrameShift extracts all frames and runs object detection (YOLOv11) across them in the background
-- In the editor, click any detected object to segment it with SAM 2
-- Apply edits (recolor, resize, delete, replace) — the edit rule runs across a frame range
-- Render the final video and get it back via Cloudinary
-- Dashboard shows all your projects with thumbnail previews — hover a card and click the image icon to generate a random thumbnail from your video frames, stored and served via Cloudinary
+## Overview
 
-## Stack
+FrameShift lets you edit objects in video without frame-by-frame manual work. Upload a video, click any object, and apply edits like recolor, remove, resize, or replace — the changes automatically propagate across your entire clip.
+
+<p align="center">
+  <img src="frontend/public/Image_1.png" alt="Landing Page" width="100%">
+</p>
+
+## Features
+
+<p align="center">
+  <img src="frontend/public/Image_2.png" alt="Feature Overview" width="100%">
+</p>
+
+- **AI Object Detection** — YOLOv11 automatically detects every object in your video. Select any object just by clicking on it.
+- **Background Removal** — Remove or swap backgrounds instantly with AI-generated scenes.
+- **Color Grading** — Change the color of any detected object across all frames.
+- **Smart Resize** — Reformat for any platform in one click.
+
+## How It Works
+
+### 1. Upload your video
+Drag and drop or upload from your device. FrameShift extracts every frame and runs object detection in the background.
+
+### 2. Select an object
+Click any detected object in the editor. SAM 2 segments it precisely and tracks it across frames.
+
+<p align="center">
+  <img src="frontend/public/Image_4.png" alt="Object Selection" width="100%">
+</p>
+
+### 3. Apply edits
+Use the toolbar to remove, recolor, resize, blur, or replace objects. Apply whole-frame effects like background removal, enhance, upscale, or restore. Or describe your edit in natural language with the AI Edit panel.
+
+<p align="center">
+  <img src="frontend/public/Image_3.png" alt="Editor View" width="100%">
+</p>
+
+### 4. Propagate to all frames
+One click propagates your edit across the entire frame range. Preview the result, then render your final video.
+
+<p align="center">
+  <img src="frontend/public/Image_6.png" alt="AI Edit Applied" width="100%">
+</p>
+
+## Tech Stack
 
 | Layer | Tech |
 |---|---|
 | Frontend | Next.js 15, Tailwind CSS, Auth0 |
 | Backend | FastAPI, Python |
-| Object detection | YOLOv11 (Ultralytics) |
+| Object Detection | YOLOv11 (Ultralytics) |
 | Segmentation | SAM 2 |
-| Storage & media | Cloudinary (image/video storage, transforms, thumbnails) |
+| Storage & Media | Cloudinary |
 | Database | Supabase (Postgres) |
-| Frame processing | FFmpeg |
+| Frame Processing | FFmpeg |
 
-## Setup
+## Architecture
+
+```
+Video Upload → FFmpeg Frame Extraction → YOLOv11 Detection
+                                              ↓
+              Click Object → SAM 2 Segmentation + Tracking
+                                              ↓
+            Apply Edit → Cloudinary Transforms (per frame)
+                                              ↓
+              FFmpeg Re-encode → Final Video via Cloudinary
+```
+
+## Supported Edits
+
+### Object-Level (SAM 2 mask)
+
+| Edit | Description |
+|---|---|
+| Recolor | Change the color of a specific object |
+| Resize | Scale an object in place |
+| Remove | AI-powered object removal |
+| Replace | Swap an object with AI-generated content from a text prompt |
+| Blur | Blur only the masked region (faces, license plates, etc.) |
+
+### Whole-Frame
+
+| Effect | Description |
+|---|---|
+| Background Remove | Remove background, keep foreground |
+| Background Replace | Replace background with an AI-generated scene |
+| Enhance | AI quality and detail improvement |
+| Upscale | AI resolution upscaling |
+| Restore | Fix compression artifacts and noise |
+| Blur | Apply blur to the entire frame |
+
+### AI Edit
+
+Describe your edit in natural language (e.g., *"make the person in the middle red"*) and FrameShift applies it.
+
+<p align="center">
+  <img src="frontend/public/Image_5.png" alt="Editor with AI Edit" width="100%">
+</p>
+
+## Getting Started
 
 ### Prerequisites
 
@@ -48,7 +136,8 @@ Download the SAM 2 checkpoint:
 
 ```bash
 mkdir checkpoints
-curl -L -o checkpoints/sam2_hiera_tiny.pt https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt
+curl -L -o checkpoints/sam2_hiera_tiny.pt \
+  https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt
 ```
 
 Create `backend/.env`:
@@ -97,53 +186,17 @@ Start the dev server:
 npm run dev
 ```
 
-App runs at `http://localhost:3000`.
-
-## Cloudinary (storage, transforms, thumbnails)
-
-FrameShift uses **Cloudinary** for image and video storage and for per-frame transforms (including thumbnails). Uploaded videos and extracted frames are stored in Cloudinary; the transformation pipeline applies edits via `CloudinaryImage.build_url()`. Thumbnails for the dashboard are generated and served from Cloudinary. All transformation URLs are built in the backend and results are downloaded locally before FFmpeg re-encodes the final video.
-
-### Edit types (object-aware, use SAM 2 mask)
-
-| Edit type | Cloudinary effect | Description |
-|---|---|---|
-| Recolor | `gen_recolor:prompt_<obj>;to-color_<hex>` | Recolor a specific object by prompt or mask |
-| Resize | Overlay crop + scale + `layer_apply` | Crop the object region and scale it in place |
-| Delete | `gen_remove` | AI-powered object removal |
-| Replace | `gen_replace:from_auto;to_<prompt>` | Swap object with AI-generated content from a text prompt |
-| Add | `gen_fill:prompt_<prompt>` with crop region | Generate and composite a new object at a specified region |
-
-### Additional AI effects
-
-| Effect | Cloudinary effect | Description |
-|---|---|---|
-| Background remove | `background_removal` | Remove background, keep foreground |
-| Background replace | `gen_background_replace:prompt_<prompt>` | Replace background with AI-generated scene |
-| Generative fill | `gen_fill` / `gen_fill:prompt_<prompt>` | Extend or fill regions with generative AI |
-| Blur (full frame) | `blur:<strength>` | Apply blur to the entire frame |
-| Blur (region) | Mask overlay + `blur:1000` + `layer_apply` | Blur only the masked region (faces, plates) |
-| Enhance | `enhance` | AI quality and detail improvement |
-| Upscale | `upscale` | AI resolution upscaling |
-| Restore | `gen_restore` | Fix compression artifacts and noise |
-| Drop shadow | `background_removal` → `dropshadow:50` | Remove background then add drop shadow to subject |
-
-### How it works
-
-```
-Frame JPEG → upload to Cloudinary → build transformation URL → download result → FFmpeg re-encode
-```
-
-Transformations are applied per frame across the selected frame range, then all processed frames are stitched back into a video and uploaded to Cloudinary for delivery.
+App runs at [http://localhost:3000](http://localhost:3000).
 
 ## API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/upload` | Create project, upload video to Cloudinary |
-| POST | `/extract` | Extract frames with FFmpeg, run YOLO detection |
-| GET | `/project/{id}/status` | Poll extraction status and frame count |
-| GET | `/frame/{id}/{index}` | Serve a specific frame as JPEG |
-| POST | `/detect` | On-demand YOLO detection for a single frame |
-| POST | `/segment` | SAM 2 segmentation + propagation |
-| POST | `/edit` | Apply batch edit rules across frame ranges |
-| POST | `/render` | Re-encode video with FFmpeg, upload to Cloudinary |
+| `POST` | `/upload` | Create project, upload video to Cloudinary |
+| `POST` | `/extract` | Extract frames with FFmpeg, run YOLO detection |
+| `GET` | `/project/{id}/status` | Poll extraction status and frame count |
+| `GET` | `/frame/{id}/{index}` | Serve a specific frame as JPEG |
+| `POST` | `/detect` | On-demand YOLO detection for a single frame |
+| `POST` | `/segment` | SAM 2 segmentation + propagation |
+| `POST` | `/edit` | Apply batch edit rules across frame ranges |
+| `POST` | `/render` | Re-encode video with FFmpeg, upload to Cloudinary |
