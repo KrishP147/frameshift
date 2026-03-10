@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/Thumbnail.png" alt="FrameShift Logo" width="400">
+  <img src="docs/Thumbnail.png" alt="FrameShift Logo" width="400">
 </p>
 
 <p align="center">
@@ -17,13 +17,13 @@
 FrameShift lets you edit objects in video without frame-by-frame manual work. Upload a video, click any object, and apply edits like recolor, remove, resize, or replace — the changes automatically propagate across your entire clip.
 
 <p align="center">
-  <img src="frontend/public/Image_1.png" alt="Landing Page" width="100%">
+  <img src="docs/Image_1.png" alt="Landing Page" width="100%">
 </p>
 
 ## Features
 
 <p align="center">
-  <img src="frontend/public/Image_2.png" alt="Feature Overview" width="100%">
+  <img src="docs/Image_2.png" alt="Feature Overview" width="100%">
 </p>
 
 - **AI Object Detection** — YOLOv11 automatically detects every object in your video. Select any object just by clicking on it.
@@ -40,21 +40,21 @@ Drag and drop or upload from your device. FrameShift extracts every frame and ru
 Click any detected object in the editor. SAM 2 segments it precisely and tracks it across frames.
 
 <p align="center">
-  <img src="frontend/public/Image_4.png" alt="Object Selection" width="100%">
+  <img src="docs/Image_4.png" alt="Object Selection" width="100%">
 </p>
 
 ### 3. Apply edits
 Use the toolbar to remove, recolor, resize, blur, or replace objects. Apply whole-frame effects like background removal, enhance, upscale, or restore. Or describe your edit in natural language with the AI Edit panel.
 
 <p align="center">
-  <img src="frontend/public/Image_3.png" alt="Editor View" width="100%">
+  <img src="docs/Image_3.png" alt="Editor View" width="100%">
 </p>
 
 ### 4. Propagate to all frames
 One click propagates your edit across the entire frame range. Preview the result, then render your final video.
 
 <p align="center">
-  <img src="frontend/public/Image_6.png" alt="AI Edit Applied" width="100%">
+  <img src="docs/Image_6.png" alt="AI Edit Applied" width="100%">
 </p>
 
 ## Tech Stack
@@ -109,7 +109,7 @@ Video Upload → FFmpeg Frame Extraction → YOLOv11 Detection
 Describe your edit in natural language (e.g., *"make the person in the middle red"*) and FrameShift applies it.
 
 <p align="center">
-  <img src="frontend/public/Image_5.png" alt="Editor with AI Edit" width="100%">
+  <img src="docs/Image_5.png" alt="Editor with AI Edit" width="100%">
 </p>
 
 ## Getting Started
