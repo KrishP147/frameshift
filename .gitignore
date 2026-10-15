@@ -68,3 +68,10 @@ checkpoints/
 # Misc
 *.pem
 .vercel
+
+# Agent tooling and internal plans (kept local, not published)
+.claude/
+docs/plans/
+docs/plans_backend/
+docs/plans_frontend/
+docs/superpowers/

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://frameshift-snowy.vercel.app">Live app</a>
+  <a href="https://frame-shift.tech">Live app</a>
   ·
   <a href="docs/frameshift-production-pipeline.md">Production pipeline</a>
   ·
